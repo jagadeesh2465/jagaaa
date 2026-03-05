@@ -1,408 +1,472 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-	<modelVersion>4.0.0</modelVersion>
-	<groupId>com.creditone.ucrm.autopaysynch</groupId>
-	<artifactId>auto-pay-config-sync-service</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
-	<name></name>
-	<description></description>
+package com.creditone.ucrm.autopaysynch.processor;
 
-	<parent>
-        <!--Automation script will patch the version in case of vulnerability discovery-->
-        <groupId>com.creditone.microservice</groupId>
-        <artifactId>reactive-microservice-starter-parent</artifactId>
-        <version>3.0.0</version>
-        <relativePath/>
-    </parent>
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
-	<properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <java.version>21</java.version>
-    </properties>
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse.ContentInner;
+import com.creditone.ucrm.autopaysynch.config.CustomerMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
 
-	<dependencies>
-		<dependency>
-            <groupId>com.creditone.microservice</groupId>
-            <artifactId>reactive-microservice-common-starter</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-starter-security</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.springframework.cloud</groupId>
-                    <artifactId>spring-cloud-starter-vault-config</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-logging</artifactId>
-            <version>3.5.7</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-to-slf4j</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>jakarta.annotation</groupId>
-            <artifactId>jakarta.annotation-api</artifactId>
-            <version>3.0.0</version>
-			<scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.projectreactor</groupId>
-            <artifactId>reactor-test</artifactId>
-            <version>3.7.13</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.19.4</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-core</artifactId>
-            <version>2.19.4</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-annotations</artifactId>
-            <version>2.19.4</version>
-        </dependency>
-        <dependency>
-            <groupId>org.aspectj</groupId>
-            <artifactId>aspectjweaver</artifactId>
-            <version>1.9.25</version>
-        </dependency>
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>42.7.8</version>
-        </dependency>
-        <dependency>
-            <groupId>io.hypersistence</groupId>
-            <artifactId>hypersistence-utils-hibernate-63</artifactId>
-            <version>3.12.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.kie</groupId>
-            <artifactId>kie-ci</artifactId>
-            <version>10.1.0</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-api</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>com.hazelcast</groupId>
-            <artifactId>hazelcast</artifactId>
-            <version>5.5.0</version>
-        </dependency>
-        <dependency>
-            <groupId>com.hazelcast</groupId>
-            <artifactId>hazelcast-enterprise</artifactId>
-            <version>5.5.0</version>
-        </dependency>
-	</dependencies>
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 
-	<build>
-		<resources>
-            <resource>
-                <filtering>true</filtering>
-                <directory>src/main/resources</directory>
-                <includes>
-                    <include>**/*.properties</include>
-                    <include>**/*.json</include>
-                </includes>
-            </resource>
-        </resources>
-		<plugins>
-			<plugin>
-				<groupId>org.openapitools</groupId>
-				<artifactId>openapi-generator-maven-plugin</artifactId>
-				<version>6.6.0</version>
-				<executions>
-					<execution>
-						<?m2e execute onConfiguration,onIncremental?>
-						<id>ciam</id>
-						<goals>
-							<goal>generate</goal>
-						</goals>
-						<configuration>
-							<inputSpec>${project.basedir}/src/main/resources/swagger/ciam/ciam.yml</inputSpec>
-							<output>${project.build.directory}/generated-sources/swagger</output>
-							<apiPackage></apiPackage>
-							<invokerPackage></invokerPackage>
-							<modelPackage>com.creditone.swagger.ciam.dtoswagger</modelPackage>
-							<apisToGenerate>false</apisToGenerate>
-							<generateApiTests>false</generateApiTests>
-							<generateSupportingFiles>false</generateSupportingFiles>
-							<generateModelTests>false</generateModelTests>
-							<skipValidateSpec>true</skipValidateSpec>
-							<library>resttemplate</library>
-							<generatorName>java</generatorName>
-							<configOptions>
-								<sourceFolder>src/main/java</sourceFolder>
-								<dateLibrary>java8</dateLibrary>
-								<enable303>true</enable303>
-								<useBeanValidation>true</useBeanValidation>
-								<serializableModel>true</serializableModel>
-								<reactive>true</reactive>
-								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
-								<useJakartaEe>true</useJakartaEe>
-								<openApiNullable>false</openApiNullable>
-							</configOptions>
-						</configuration>
-					</execution>
-					<execution>
-						<?m2e execute onConfiguration,onIncremental?>
-						<id>credit-account-service</id>
-						<goals>
-							<goal>generate</goal>
-						</goals>
-						<configuration>
-							<inputSpec>${project.basedir}/src/main/resources/swagger/credit-account-service/credit-account-service.yml</inputSpec>
-							<output>${project.build.directory}/generated-sources/swagger</output>
-							<apiPackage></apiPackage>
-							<invokerPackage></invokerPackage>
-							<modelPackage>com.creditone.swagger.creditaccountservice.dtoswagger</modelPackage>
-							<apisToGenerate>false</apisToGenerate>
-							<generateApiTests>false</generateApiTests>
-							<generateSupportingFiles>false</generateSupportingFiles>
-							<generateModelTests>false</generateModelTests>
-							<skipValidateSpec>true</skipValidateSpec>
-							<library>resttemplate</library>
-							<generatorName>java</generatorName>
-							<configOptions>
-								<sourceFolder>src/main/java</sourceFolder>
-								<dateLibrary>java8</dateLibrary>
-								<enable303>true</enable303>
-								<useBeanValidation>true</useBeanValidation>
-								<serializableModel>true</serializableModel>
-								<reactive>true</reactive>
-								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
-								<useJakartaEe>true</useJakartaEe>
-								<openApiNullable>false</openApiNullable>
-							</configOptions>
-						</configuration>
-					</execution>
-					<execution>
-						<?m2e execute onConfiguration,onIncremental?>
-						<id>creditcard-extaccounts-agentid-fallback-service-api</id>
-						<goals>
-							<goal>generate</goal>
-						</goals>
-						<configuration>
-							<inputSpec>${project.basedir}/src/main/resources/swagger/agentidfallbackservice/agentid-fallback-service.yaml</inputSpec>
-							<output>${project.build.directory}/generated-sources/swagger</output>
-							<apiPackage></apiPackage>
-							<invokerPackage></invokerPackage>
-							<modelPackage>com.creditone.swagger.agentidfallbackservice.dtoswagger</modelPackage>
-							<apisToGenerate>false</apisToGenerate>
-							<generateApiTests>false</generateApiTests>
-							<generateSupportingFiles>false</generateSupportingFiles>
-							<generateModelTests>false</generateModelTests>
-							<skipValidateSpec>true</skipValidateSpec>
-							<library>resttemplate</library>
-							<generatorName>java</generatorName>
-							<configOptions>
-								<sourceFolder>src/main/java</sourceFolder>
-								<dateLibrary>java8</dateLibrary>
-								<enable303>true</enable303>
-								<useBeanValidation>true</useBeanValidation>
-								<serializableModel>true</serializableModel>
-								<reactive>true</reactive>
-								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
-								<useJakartaEe>true</useJakartaEe>
-								<openApiNullable>false</openApiNullable>
-							</configOptions>
-						</configuration>
-					</execution>
-					<execution>
-						<?m2e execute onConfiguration,onIncremental?>
-						<id>auto-pay-config-sync-service</id>
-						<goals>
-							<goal>generate</goal>
-						</goals>
-						<configuration>
-							<inputSpec>${project.basedir}/src/main/resources/swagger/autopayconfigsyncservice/auto-pay-config-sync-service.yaml</inputSpec>
-							<output>${project.build.directory}/generated-sources/swagger</output>
-							<apiPackage></apiPackage>
-							<invokerPackage></invokerPackage>
-							<modelPackage>com.creditone.swagger.autopayconfigsyncservice.dtoswagger</modelPackage>
-							<apisToGenerate>false</apisToGenerate>
-							<generateApiTests>false</generateApiTests>
-							<generateSupportingFiles>false</generateSupportingFiles>
-							<generateModelTests>false</generateModelTests>
-							<skipValidateSpec>true</skipValidateSpec>
-							<library>resttemplate</library>
-							<generatorName>java</generatorName>
-							<configOptions>
-								<sourceFolder>src/main/java</sourceFolder>
-								<dateLibrary>java8</dateLibrary>
-								<enable303>true</enable303>
-								<useBeanValidation>true</useBeanValidation>
-								<serializableModel>true</serializableModel>
-								<reactive>true</reactive>
-								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
-								<useJakartaEe>true</useJakartaEe>
-								<openApiNullable>false</openApiNullable>
-							</configOptions>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
-			<!--  Plugin configurations are inherited from parent-->
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <addResources>true</addResources>
-                </configuration>
-            </plugin>
-            <plugin>
-                <!-- Building an executable jar -->
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>com.creditone.ucrm.autopaysynch.Application</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-            <!-- Plugins for Junit mvn test and Jacoco starts -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-failsafe-plugin</artifactId>
-            </plugin>
+import java.util.LinkedMultiValueMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>**/*com/creditone/ucrm/autopaysynch/Application.class</exclude>
-                        <exclude>**/*com/creditone/swagger/**</exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
+/**
+ * Processor for resolving modern Customer IDs from legacy Customer IDs.
+ * Strategy:
+ *   1. Try Hazelcast cache first (fast path)
+ *   2. Fall back to Customer Domain Service if not found
+ *
+ * Lead's requirement:
+ *   CustomerMappingProcessor -> getModernCustomerId(legacyCustomerId) -> hazelcast -> externalcallservice -> fallback
+ */
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(CustomerMappingPropertiesConfig.class)
+public class CustomerMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
 
-            <!-- Plugins for Junit mvn test and Jacoco ends -->
-            <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.0.0</version>
-                <configuration>
-                    <java>
-                        <includes>
-                            <include>src/main/java/**/*.java</include>
-                            <include>src/test/java/**/*.java</include>
-                        </includes>
-                        <excludes>
-                            <exclude>target/generated-sources/**/*.java</exclude>
-                            <exclude>src/main/java/**/generated/**/*.java</exclude>
-                        </excludes>
-                        <importOrder>
-                            <order>
-                                java|javax,jakarta,org.springframework,org,com,com.creditone,,\#</order>
-                        </importOrder>
-                        <eclipse>
-					        <file>${project.basedir}/code-formatter.xml</file>
-					    </eclipse>
-                        <removeUnusedImports />
-                        <replace>
-                            <name>Remove extra blank lines</name>
-                            <search>\n\n\n+</search>
-                            <replacement>\n\n</replacement>
-                        </replace>
-                        <trimTrailingWhitespace />
-                        <endWithNewline />
-                    </java>
-                    <formats>
-                        <format>
-						    <includes>
-						        <include>src/main/resources/**/*.yml</include>
-						        <include>src/main/resources/**/*.yaml</include>
-						        <include>src/test/resources/**/*.yml</include>
-						        <include>src/test/resources/**/*.yaml</include>
-						    </includes>
-						    <trimTrailingWhitespace />
-						    <endWithNewline />
-						    <indent>
-						        <spaces>true</spaces>
-						        <spacesPerTab>2</spacesPerTab>
-						    </indent>
-						</format>
-                        <format>
-                            <includes>
-                                <include>src/main/resources/**/*.properties</include>
-                                <include>src/test/resources/**/*.properties</include>
-                            </includes>
-                            <trimTrailingWhitespace />
-                            <endWithNewline />
-                        </format>
-                    </formats>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>spotless-apply</id>
-                        <goals>
-                            <goal>apply</goal>
-                        </goals>
-                        <phase>process-sources</phase>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-			    <groupId>org.apache.maven.plugins</groupId>
-			    <artifactId>maven-compiler-plugin</artifactId>
-			    <configuration>
-			        <annotationProcessorPaths>
-			            <path>
-			                <groupId>org.projectlombok</groupId>
-			                <artifactId>lombok</artifactId>
-			                <version>1.18.42</version>
-			            </path>
-			        </annotationProcessorPaths>
-			    </configuration>
-			</plugin>
-		</plugins>
-	</build>
+	private final CustomerMappingPropertiesConfig config;
+	private final ExternalCallService externalCallService;
+	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
 
-	<repositories>
-        <repository>
-            <!--All packages needed can be found at Development Group-->
-            <id>gitlab-maven</id>
-            <url>https://gitlab.com/api/v4/groups/13452711/-/packages/maven</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-        <repository>
-            <id>sona-hazelcast</id>
-            <url>https://sona-artifacts.c1b.corp/repository/maven-hazelcast/</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-    </repositories>
-</project>
+	@org.springframework.beans.factory.annotation.Value("${external-service.customer-domain.host}")
+	private String customerDomainHost;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.customer-domain.system-linkages-uri}")
+	private String systemLinkagesUri;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.customer-domain.apikey}")
+	private String customerDomainApiKey;
+
+	public CustomerMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor,
+			ExternalCallService externalCallService,
+			AutoPaySyncClientHandler autoPaySyncClientHandler,
+			CustomerMappingPropertiesConfig config) {
+		super(hazelcastWrapperProcessor, externalCallService);
+		this.config = config;
+		this.externalCallService = externalCallService;
+		this.autoPaySyncClientHandler = autoPaySyncClientHandler;
+	}
+
+	/**
+	 * Resolves the modern customer UUID for a given legacy customer ID.
+	 * Tries Hazelcast first, falls back to Customer Domain Service.
+	 *
+	 * @param legacyCustomerId the legacy customer ID
+	 * @param correlationId    for distributed tracing
+	 * @return Mono of modern customer UUID string
+	 */
+	public Mono<String> getModernCustomerId(String legacyCustomerId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern customer ID for legacyCustomerId: {}",
+				correlationId, legacyCustomerId);
+		return convertId(legacyCustomerId, SyncType.LEGACY_TO_MODERN, correlationId);
+	}
+
+	@Override
+	protected String getMapName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY
+				? config.getModernToLegacy().getMapName()
+				: config.getLegacyToModern().getMapName();
+	}
+
+	@Override
+	protected String getKeyName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY
+				? config.getModernToLegacy().getKeyName()
+				: config.getLegacyToModern().getKeyName();
+	}
+
+	@Override
+	protected String getEntityType() {
+		return "CUSTOMER";
+	}
+
+	@Override
+	protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+		String customerId = record.getString(keyName);
+		if (customerId == null || customerId.trim().isEmpty()) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Customer ID is null or empty for keyName '{}' for {}",
+					correlationId, keyName, syncType);
+			return Mono.empty();
+		}
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved customer ID for {} from Hazelcast: {}",
+				correlationId, syncType, customerId);
+		return Mono.just(customerId.trim());
+	}
+
+	@Override
+	protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX
+				+ "Falling back to Customer Domain Service for legacyCustomerId: {}", correlationId, key);
+
+		var headers = Map.of(AutoPaySynchConstant.CORRELATION_ID, correlationId,
+				"apiKey", customerDomainApiKey);
+		var params = new LinkedMultiValueMap<String, String>();
+		params.add("systemCustomerId", key);
+
+		String url = customerDomainHost + systemLinkagesUri;
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "customer-domain-service", params)
+				.bodyToMono(SystemLinkagesResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from Customer Domain Service for legacyCustomerId: {}: {}",
+						correlationId, key, response))
+				.flatMap(response -> extractModernCustomerId(response, key, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error from Customer Domain Service for legacyCustomerId: {}, Error: {}",
+							correlationId, key, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<String> extractModernCustomerId(SystemLinkagesResponse response, String legacyCustomerId,
+			String correlationId) {
+		if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No data found from Customer Domain Service for legacyCustomerId: " + legacyCustomerId,
+					correlationId));
+		}
+
+		List<ContentInner> content = response.getContent();
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(ContentInner::getIndividualUniqueIdentifier)
+				.filter(Objects::nonNull)
+				.map(Object::toString)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "No modern customer ID found for legacyCustomerId: {}", correlationId, legacyCustomerId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern customer ID found for legacyCustomerId: " + legacyCustomerId, correlationId));
+				});
+	}
+
+}
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.PageUserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponse;
+import com.creditone.ucrm.autopaysynch.config.AgentMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+import java.util.LinkedMultiValueMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Processor for resolving modern Agent IDs from legacy Agent IDs.
+ * Strategy:
+ *   1. Try Hazelcast cache first (fast path)
+ *   2. Fall back to Co-Op User Admin Service if not found
+ *
+ * Lead's requirement:
+ *   AgentMappingProcessor -> getModernAgentId(legacyAgentId) -> hazelcast -> externalcallservice -> fallback
+ */
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(AgentMappingPropertiesConfig.class)
+public class AgentMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
+
+	private final AgentMappingPropertiesConfig config;
+	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.coop-user-admin.host}")
+	private String coopUserAdminHost;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.coop-user-admin.users-uri}")
+	private String usersUri;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.coop-user-admin.apikey}")
+	private String coopUserAdminApiKey;
+
+	@org.springframework.beans.factory.annotation.Value("${external-service.coop-user-admin.requested-by}")
+	private String requestedBy;
+
+	public AgentMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor,
+			ExternalCallService externalCallService,
+			AutoPaySyncClientHandler autoPaySyncClientHandler,
+			AgentMappingPropertiesConfig config) {
+		super(hazelcastWrapperProcessor, externalCallService);
+		this.config = config;
+		this.autoPaySyncClientHandler = autoPaySyncClientHandler;
+	}
+
+	/**
+	 * Resolves the modern agent UUID for a given legacy CAS agent ID.
+	 * Tries Hazelcast first, falls back to Co-Op User Admin Service.
+	 *
+	 * @param legacyAgentId the legacy CAS agent ID
+	 * @param correlationId for distributed tracing
+	 * @return Mono of modern agent UUID string
+	 */
+	public Mono<String> getModernAgentId(String legacyAgentId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern agent ID for legacyAgentId: {}",
+				correlationId, legacyAgentId);
+		return convertId(legacyAgentId, SyncType.LEGACY_TO_MODERN, correlationId);
+	}
+
+	@Override
+	protected String getMapName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY
+				? config.getModernToLegacy().getMapName()
+				: config.getLegacyToModern().getMapName();
+	}
+
+	@Override
+	protected String getKeyName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY
+				? config.getModernToLegacy().getKeyName()
+				: config.getLegacyToModern().getKeyName();
+	}
+
+	@Override
+	protected String getEntityType() {
+		return "AGENT";
+	}
+
+	@Override
+	protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+		String agentId = record.getString(keyName);
+		if (agentId == null || agentId.trim().isEmpty()) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Agent ID is null or empty for keyName '{}' for {}",
+					correlationId, keyName, syncType);
+			return Mono.empty();
+		}
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved agent ID for {} from Hazelcast: {}",
+				correlationId, syncType, agentId);
+		return Mono.just(agentId.trim());
+	}
+
+	@Override
+	protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX
+				+ "Falling back to Co-Op User Admin Service for legacyAgentId: {}", correlationId, key);
+
+		var headers = Map.of(
+				"apiKey", coopUserAdminApiKey,
+				AutoPaySynchConstant.CORRELATION_ID, correlationId,
+				"requestedBy", requestedBy);
+
+		var params = new LinkedMultiValueMap<String, String>();
+		params.add("casId", key);
+
+		String url = coopUserAdminHost + usersUri;
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "co-op-user-admin-service", params)
+				.bodyToMono(PageUserResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from Co-Op User Admin Service for legacyAgentId: {}: {}",
+						correlationId, key, response))
+				.flatMap(response -> extractModernAgentId(response, key, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error from Co-Op User Admin Service for legacyAgentId: {}, Error: {}",
+							correlationId, key, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<String> extractModernAgentId(PageUserResponse response, String legacyAgentId,
+			String correlationId) {
+		if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No data found from Co-Op User Admin Service for legacyAgentId: " + legacyAgentId,
+					correlationId));
+		}
+
+		List<UserResponse> content = response.getContent();
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(UserResponse::getUniqueIdentifier)
+				.filter(Objects::nonNull)
+				.map(Object::toString)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "No modern agent ID found for legacyAgentId: {}", correlationId, legacyAgentId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern agent ID found for legacyAgentId: " + legacyAgentId, correlationId));
+				});
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.service;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.StringUtils;
+
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse.ContentInner;
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Service responsible for external HTTP API calls in the autopay synchronization system.
+ * Follows the exact same pattern as ExternalCallService in debit-card-payment-sync-service.
+ *
+ * Lead's requirement:
+ *   externalcallservice -> getModernCreditAccountId(legacyCreditAccountId)
+ *
+ * Calls: Credit Account Service
+ *   GET /private/creditcard/accounts?individualId={modernCustomerId}
+ */
+@Slf4j
+@Component
+@RefreshScope
+@RequiredArgsConstructor
+@EnableConfigurationProperties(ExternalCallService.ExternalServiceConfig.class)
+public class ExternalCallService {
+
+	private final ExternalServiceConfig externalServiceConfig;
+	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+	@Data
+	@ConfigurationProperties(prefix = "external-service")
+	public static class ExternalServiceConfig {
+
+		private CreditAccountConfig creditAccount;
+
+		@Data
+		public static class CreditAccountConfig {
+			private String host;
+			private String accountsUri;
+			private String apikey;
+		}
+
+	}
+
+	/**
+	 * Resolves the modern credit account UUID for a given modern customer ID
+	 * by calling the Credit Account Service.
+	 * GET /private/creditcard/accounts?individualId={modernCustomerId}
+	 *
+	 * @param modernCustomerId modern customer UUID (resolved from CustomerMappingProcessor)
+	 * @param correlationId    for distributed tracing
+	 * @return Mono of AccountIdDto with the resolved modern account ID
+	 */
+	public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to getModernCreditAccountId() for modernCustomerId: {}",
+				correlationId, modernCustomerId);
+
+		var headers = Map.of(AutoPaySynchConstant.CORRELATION_ID, correlationId,
+				"apiKey", externalServiceConfig.getCreditAccount().getApikey());
+
+		var params = new LinkedMultiValueMap<String, String>();
+		params.add("individualId", modernCustomerId);
+
+		String url = externalServiceConfig.getCreditAccount().getHost()
+				+ externalServiceConfig.getCreditAccount().getAccountsUri();
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "credit-account-service", params)
+				.bodyToMono(AccountsDetailsResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from getModernCreditAccountId() for modernCustomerId: {}: {}",
+						correlationId, modernCustomerId, response))
+				.flatMap(response -> extractModernCreditAccountId(response, modernCustomerId, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error in getModernCreditAccountId() for modernCustomerId: {}, Error: {}",
+							correlationId, modernCustomerId, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<AccountIdDto> extractModernCreditAccountId(AccountsDetailsResponse response,
+			String modernCustomerId, String correlationId) {
+		if (response == null) {
+			return Mono.error(new AutoPaySynchException(
+					"Null response from Credit Account Service for modernCustomerId: " + modernCustomerId,
+					correlationId));
+		}
+
+		List<ContentInner> content = response.getContent();
+		if (content == null || content.isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No account data found for modernCustomerId: " + modernCustomerId, correlationId));
+		}
+
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(ContentInner::getAccountId)
+				.filter(Objects::nonNull)
+				.map(Object::toString)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(AccountIdDto::new)
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "No modern credit account ID found for modernCustomerId: {}",
+							correlationId, modernCustomerId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern credit account ID found for modernCustomerId: " + modernCustomerId,
+							correlationId));
+				});
+	}
+
+}
