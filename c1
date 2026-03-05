@@ -286,3 +286,270 @@ public class CreditAccountsResponse {
 	}
 
 }
+
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Wrapper processor for Hazelcast operations in the autopay synchronization system.
+ * Provides safe access to Hazelcast distributed maps with optional dependency injection
+ * and graceful error handling.
+ * Follows the same pattern as debit-card-payment-sync-service.
+ */
+@Component
+@Slf4j
+public class HazelcastWrapperProcessor {
+
+	private final HazelcastInstance hazelcastInstance;
+	private final boolean hazelcastAvailable;
+
+	public HazelcastWrapperProcessor(@Autowired(required = false) HazelcastInstance hazelcastInstance) {
+		this.hazelcastInstance = hazelcastInstance;
+		this.hazelcastAvailable = hazelcastInstance != null;
+		if (hazelcastAvailable) {
+			log.info("HazelcastWrapperProcessor initialized with active Hazelcast instance");
+		} else {
+			log.warn("HazelcastWrapperProcessor initialized WITHOUT Hazelcast — will fall back to external service calls");
+		}
+	}
+
+	/**
+	 * Retrieves a distributed map from Hazelcast by name with error handling.
+	 * Returns null if Hazelcast is unavailable or if an error occurs,
+	 * allowing callers to fall back to external service calls gracefully.
+	 *
+	 * @param mapName       the name of the distributed map to retrieve
+	 * @param correlationId unique identifier for tracking this operation
+	 * @return the requested IMap, or null if unavailable or on error
+	 */
+	public IMap<String, GenericRecord> getMap(String mapName, String correlationId) {
+		try {
+			if (hazelcastAvailable) {
+				return hazelcastInstance.getMap(mapName);
+			}
+			return null;
+		} catch (Exception e) {
+			log.error(AutoPaySynchConstant.LOG_PREFIX + "Error getting map {} from Hazelcast, error: {} cause: {}", correlationId, mapName, e.getMessage(), ExceptionUtils
+					.getStackTrace(e).replaceAll("\\r?\\n", " "));
+			return null;
+		}
+	}
+
+	/**
+	 * Returns whether Hazelcast is available and active.
+	 *
+	 * @return true if Hazelcast instance is connected
+	 */
+	public boolean isHazelcastAvailable() {
+		return hazelcastAvailable;
+	}
+
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Abstract base processor for Hazelcast-based ID mapping with external service fallback.
+ * Provides common functionality for converting IDs between legacy and modern systems.
+ * Follows the same pattern as debit-card-payment-sync-service.
+ *
+ * @param <T> the return type for converted IDs
+ */
+@Slf4j
+@RequiredArgsConstructor
+public abstract class AbstractHazelcastLookupProcessor<T> {
+
+	protected final HazelcastWrapperProcessor hazelcastWrapperProcessor;
+	protected final ExternalCallService externalCallService;
+
+	/**
+	 * Converts an ID based on the specified sync type.
+	 * First attempts to retrieve from Hazelcast cache,
+	 * then falls back to external service if not found.
+	 *
+	 * @param key           the ID to convert
+	 * @param syncType      the direction of conversion
+	 * @param correlationId unique identifier for tracking the request
+	 * @return Mono containing the converted ID, or empty if conversion fails
+	 */
+	public Mono<T> convertId(String key, SyncType syncType, String correlationId) {
+		if (key == null || key.trim().isEmpty()) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Invalid key provided for {} conversion for {}", correlationId, getEntityType(), syncType);
+			return Mono.empty();
+		}
+
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "{} Converting ID for {}: key={}", correlationId, getEntityType(), syncType, key);
+
+		return getIdFromHazelcast(key, syncType, correlationId).switchIfEmpty(fallbackToExternalService(key, syncType, correlationId)).doOnSuccess(result -> {
+			if (result != null) {
+				log.info(AutoPaySynchConstant.LOG_PREFIX + "{} ID conversion successful for {}: {} -> {}", correlationId, getEntityType(), syncType, key, result);
+			}
+		});
+	}
+
+	/**
+	 * Retrieves ID from Hazelcast cache based on sync type configuration.
+	 */
+	private Mono<T> getIdFromHazelcast(String key, SyncType syncType, String correlationId) {
+		try {
+			String mapName = getMapName(syncType);
+			String keyName = getKeyName(syncType);
+
+			IMap<String, GenericRecord> map = hazelcastWrapperProcessor.getMap(mapName, correlationId);
+			if (map == null) {
+				log.warn(AutoPaySynchConstant.LOG_PREFIX + "Hazelcast map '{}' not found for {}", correlationId, mapName, syncType);
+				return Mono.empty();
+			}
+
+			GenericRecord record = map.get(key);
+			if (record == null) {
+				log.warn(AutoPaySynchConstant.LOG_PREFIX + "Record not found for key '{}' in map '{}' for {}", correlationId, key, mapName, syncType);
+				return Mono.empty();
+			}
+
+			return processRecord(record, syncType, correlationId, keyName);
+
+		} catch (Exception e) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Error retrieving {} ID for {} from Hazelcast for key={}, error={}, cause={}", correlationId, getEntityType(), syncType,
+					key, e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+			return Mono.empty();
+		}
+	}
+
+	/**
+	 * Fallback method that delegates to external service when Hazelcast lookup fails.
+	 */
+	private Mono<T> fallbackToExternalService(String key, SyncType syncType, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Falling back to externalCallService for {} for key={}", correlationId, syncType, key);
+		return callExternalService(key, syncType, correlationId);
+	}
+
+	// ── Abstract methods to be implemented by concrete processors ──
+
+	protected abstract String getMapName(SyncType syncType);
+
+	protected abstract String getKeyName(SyncType syncType);
+
+	protected abstract String getEntityType();
+
+	protected abstract Mono<T> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName);
+
+	protected abstract Mono<T> callExternalService(String key, SyncType syncType, String correlationId);
+
+}
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+
+import lombok.Data;
+
+/**
+ * Configuration properties for Customer ID Hazelcast map names and key names.
+ *
+ * Example application.properties:
+ *
+ * customer-mapping.legacy-to-modern.map-name=AUTOPAY_CUSTOMER_LTM_MAP
+ * customer-mapping.legacy-to-modern.key-name=modernCustomerId
+ * customer-mapping.modern-to-legacy.map-name=AUTOPAY_CUSTOMER_MTL_MAP
+ * customer-mapping.modern-to-legacy.key-name=legacyCustomerId
+ */
+@Data
+@RefreshScope
+@ConfigurationProperties(prefix = "customer-mapping")
+public class CustomerMappingPropertiesConfig {
+
+	private MapConfig legacyToModern;
+	private MapConfig modernToLegacy;
+
+	@Data
+	public static class MapConfig {
+		/** Hazelcast map name for this sync direction */
+		private String mapName;
+		/** Key name inside the GenericRecord to extract the customer ID */
+		private String keyName;
+	}
+
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+
+import lombok.Data;
+
+/**
+ * Configuration properties for Agent ID Hazelcast map names and key names.
+ * Mirrors AgentMappingPropertiesConfig from debit-card-payment-sync-service.
+ *
+ * Example application.properties:
+ *
+ * agent-mapping.legacy-to-modern.map-name=AUTOPAY_AGENT_LTM_MAP
+ * agent-mapping.legacy-to-modern.key-name=modernAgentId
+ * agent-mapping.modern-to-legacy.map-name=AUTOPAY_AGENT_MTL_MAP
+ * agent-mapping.modern-to-legacy.key-name=legacyAgentId
+ */
+@Data
+@RefreshScope
+@ConfigurationProperties(prefix = "agent-mapping")
+public class AgentMappingPropertiesConfig {
+
+	private MapConfig legacyToModern;
+	private MapConfig modernToLegacy;
+
+	@Data
+	public static class MapConfig {
+		/** Hazelcast map name for this sync direction */
+		private String mapName;
+		/** Key name inside the GenericRecord to extract the agent ID */
+		private String keyName;
+	}
+
+}
