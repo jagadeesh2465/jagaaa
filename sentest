@@ -1,0 +1,452 @@
+package com.creditone.ucrm.autopaysynch.kafka.consumer;
+
+import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.kafka.clients.consumer.CommitFailedException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+
+import com.creditone.ucrm.autopaysynch.config.KafkaPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+import com.creditone.ucrm.autopaysynch.kafka.event.EventWithCorrelationData;
+import com.creditone.ucrm.autopaysynch.processor.CommonSyncProcessor;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.kafka.receiver.ReceiverOffset;
+import reactor.kafka.receiver.ReceiverRecord;
+import reactor.test.StepVerifier;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class AbstractKafkaConsumerTest {
+
+	@Mock
+	private KafkaPropertiesConfig properties;
+	@Mock
+	private KafkaPropertiesConfig.Consumer consumer;
+	@Mock
+	private KafkaPropertiesConfig.Consumer.Common common;
+	@Mock
+	private CommonSyncProcessor commonActivityProcessor;
+	@Mock
+	private ReceiverRecord<String, String> receiverRecord;
+	@Mock
+	private ReceiverOffset receiverOffset;
+
+	private TestKafkaConsumer testConsumer;
+
+	static class TestEvent {
+		private String id;
+		private String data;
+
+		public TestEvent() {
+		}
+
+		public TestEvent(String id, String data) {
+			this.id = id;
+			this.data = data;
+		}
+
+		public String getId() {
+			return id;
+		}
+
+		public void setId(String id) {
+			this.id = id;
+		}
+
+		public String getData() {
+			return data;
+		}
+
+		public void setData(String data) {
+			this.data = data;
+		}
+	}
+
+	class TestKafkaConsumer extends AbstractKafkaConsumer<TestEvent> {
+		private Flux<EventWithCorrelationData<TestEvent>> testFlux;
+		private Mono<ResultDTO> processResult;
+
+		public TestKafkaConsumer(KafkaPropertiesConfig properties, CommonSyncProcessor processor) {
+			super(properties, processor);
+			this.testFlux = Flux.empty();
+			this.processResult = Mono.just(new ResultDTO(true, null));
+		}
+
+		public void setTestFlux(Flux<EventWithCorrelationData<TestEvent>> flux) {
+			this.testFlux = flux;
+		}
+
+		public void setProcessResult(Mono<ResultDTO> result) {
+			this.processResult = result;
+		}
+
+		@Override
+		protected Flux<EventWithCorrelationData<TestEvent>> createConsumerFlux() {
+			return testFlux;
+		}
+
+		@Override
+		public SyncType getEventType() {
+			return SyncType.LEGACY_TO_MODERN;
+		}
+
+		@Override
+		public String getTopic() {
+			return "test-topic";
+		}
+
+		@Override
+		protected Mono<ResultDTO> processEvent(TestEvent event, AutoPaySynchLogResponse response, String correlationId) {
+			return processResult;
+		}
+
+		@Override
+		protected Class<TestEvent> getEventClass() {
+			return TestEvent.class;
+		}
+	}
+
+	@BeforeEach
+	void setUp() {
+		lenient().when(properties.getConsumer()).thenReturn(consumer);
+		lenient().when(consumer.getCommon()).thenReturn(common);
+		lenient().when(common.getRetryAttempts()).thenReturn(3);
+		lenient().when(common.getRetryBackoffMs()).thenReturn(100L);
+		lenient().when(common.getRetryMaxDelayMs()).thenReturn(1000L);
+		lenient().when(common.getRetryJitter()).thenReturn(0.5);
+
+		testConsumer = new TestKafkaConsumer(properties, commonActivityProcessor);
+	}
+
+	// ==================== startConsuming ====================
+
+	@Test
+	void testStartConsuming_Success() throws InterruptedException {
+		CountDownLatch subscribeLatch = new CountDownLatch(1);
+		CountDownLatch processLatch = new CountDownLatch(1);
+
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent("1", "test"), "corr-123", Instant.now(), null, receiverRecord);
+
+		// Create a flux that never completes to keep disposable active
+		Flux<EventWithCorrelationData<TestEvent>> flux = Flux.just(event).doOnSubscribe(s -> subscribeLatch.countDown()).doOnNext(e -> processLatch.countDown()).concatWith(Flux
+				.never()); // Keep flux alive
+
+		testConsumer.setTestFlux(flux);
+		testConsumer.startConsuming();
+
+		assertTrue(subscribeLatch.await(2, TimeUnit.SECONDS));
+		assertTrue(processLatch.await(2, TimeUnit.SECONDS));
+		assertTrue(testConsumer.isConsumerActive());
+
+		// Cleanup
+		testConsumer.cleanup();
+	}
+
+	@Test
+	void testStartConsuming_WithError() throws InterruptedException {
+		CountDownLatch latch = new CountDownLatch(1);
+		Flux<EventWithCorrelationData<TestEvent>> flux = Flux.<EventWithCorrelationData<TestEvent>>error(new RuntimeException("Error")).doOnError(e -> latch.countDown());
+
+		testConsumer.setTestFlux(flux);
+		testConsumer.startConsuming();
+
+		assertTrue(latch.await(2, TimeUnit.SECONDS));
+	}
+
+	// ==================== createRetrySpec ====================
+
+	@Test
+	void testCreateRetrySpec_Success() {
+		assertNotNull(testConsumer.createRetrySpec());
+	}
+
+	@Test
+	void testCreateRetrySpec_ExhaustsRetries() {
+		Flux<String> flux = Flux.<String>error(new java.util.concurrent.TimeoutException()).retryWhen(testConsumer.createRetrySpec());
+
+		StepVerifier.create(flux).expectError().verify();
+	}
+
+	// ==================== mapRecordWithCorrelation ====================
+
+	@Test
+	void testMapRecordWithCorrelation_Success() {
+		when(receiverRecord.value()).thenReturn("{\"id\":\"123\",\"data\":\"test\"}");
+		when(receiverRecord.key()).thenReturn("key-123");
+		when(receiverRecord.partition()).thenReturn(0);
+		when(receiverRecord.offset()).thenReturn(100L);
+		when(receiverRecord.topic()).thenReturn("test-topic");
+
+		EventWithCorrelationData<TestEvent> result = testConsumer.mapRecordWithCorrelation(receiverRecord, TestEvent.class);
+
+		assertNotNull(result);
+		assertNotNull(result.getEvent());
+		assertEquals("123", result.getEvent().getId());
+		assertNull(result.getError());
+	}
+
+	@Test
+	void testMapRecordWithCorrelation_InvalidJson() {
+		when(receiverRecord.value()).thenReturn("invalid json");
+		when(receiverRecord.key()).thenReturn("key-123");
+		when(receiverRecord.partition()).thenReturn(0);
+		when(receiverRecord.offset()).thenReturn(100L);
+		when(receiverRecord.topic()).thenReturn("test-topic");
+
+		EventWithCorrelationData<TestEvent> result = testConsumer.mapRecordWithCorrelation(receiverRecord, TestEvent.class);
+
+		assertNotNull(result);
+		assertNull(result.getEvent());
+		assertNotNull(result.getError());
+		assertTrue(result.getError() instanceof AutoPaySynchException);
+	}
+
+	// ==================== extractCorrelationId ====================
+
+	@Test
+	void testExtractCorrelationId_FromEvent() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+
+		assertEquals("corr-123", testConsumer.extractCorrelationId(null, event));
+	}
+
+	@Test
+	void testExtractCorrelationId_FromException() {
+		AutoPaySynchException exception = new AutoPaySynchException("Error", "corr-456", new RuntimeException());
+
+		assertEquals("corr-456", testConsumer.extractCorrelationId(exception, "not-event"));
+	}
+
+	@Test
+	void testExtractCorrelationId_Unknown() {
+		assertEquals("unknown", testConsumer.extractCorrelationId(new RuntimeException(), "not-event"));
+	}
+
+	// ==================== run ====================
+
+	@Test
+	void testRun_Success() throws InterruptedException {
+		CountDownLatch latch = new CountDownLatch(1);
+		Flux<EventWithCorrelationData<TestEvent>> flux = Flux.<EventWithCorrelationData<TestEvent>>empty().doOnSubscribe(s -> latch.countDown());
+
+		testConsumer.setTestFlux(flux);
+		testConsumer.run();
+
+		assertTrue(latch.await(2, TimeUnit.SECONDS));
+	}
+
+	// ==================== cleanup ====================
+
+	@Test
+	void testCleanup_WithActiveConsumer() throws InterruptedException {
+		CountDownLatch latch = new CountDownLatch(1);
+
+		// Create flux that never completes
+		Flux<EventWithCorrelationData<TestEvent>> flux = Flux.<EventWithCorrelationData<TestEvent>>never().doOnSubscribe(s -> latch.countDown());
+
+		testConsumer.setTestFlux(flux);
+		testConsumer.startConsuming();
+
+		assertTrue(latch.await(2, TimeUnit.SECONDS));
+		assertTrue(testConsumer.isConsumerActive());
+
+		testConsumer.cleanup();
+
+		assertFalse(testConsumer.isConsumerActive());
+	}
+
+	@Test
+	void testCleanup_WithNullDisposable() {
+		testConsumer.consumerDisposable = null;
+		assertDoesNotThrow(() -> testConsumer.cleanup());
+	}
+
+	// ==================== isConsumerActive ====================
+
+	@Test
+	void testIsConsumerActive_True() throws InterruptedException {
+		CountDownLatch latch = new CountDownLatch(1);
+
+		Flux<EventWithCorrelationData<TestEvent>> flux = Flux.<EventWithCorrelationData<TestEvent>>never().doOnSubscribe(s -> latch.countDown());
+
+		testConsumer.setTestFlux(flux);
+		testConsumer.startConsuming();
+
+		assertTrue(latch.await(2, TimeUnit.SECONDS));
+		assertTrue(testConsumer.isConsumerActive());
+
+		testConsumer.cleanup();
+	}
+
+	@Test
+	void testIsConsumerActive_False() {
+		testConsumer.consumerDisposable = null;
+		assertFalse(testConsumer.isConsumerActive());
+	}
+
+	// ==================== handleError ====================
+
+	@Test
+	void testHandleError_Success() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+		AutoPaySynchLogResponse response = new AutoPaySynchLogResponse();
+		RuntimeException error = new RuntimeException("Error");
+		ResultDTO expected = new ResultDTO(false, error);
+
+		when(receiverRecord.value()).thenReturn("{}");
+		when(commonActivityProcessor.handleError(eq(event), eq(response), eq(SyncType.LEGACY_TO_MODERN), eq(error))).thenReturn(Mono.just(expected));
+
+		StepVerifier.create(testConsumer.handleError(event, response, error)).expectNext(expected).verifyComplete();
+	}
+
+	@Test
+	void testHandleError_WithNullError() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+		AutoPaySynchLogResponse response = new AutoPaySynchLogResponse();
+		ResultDTO expected = new ResultDTO(false, null);
+
+		when(receiverRecord.value()).thenReturn("{}");
+		when(commonActivityProcessor.handleError(eq(event), eq(response), eq(SyncType.LEGACY_TO_MODERN), isNull())).thenReturn(Mono.just(expected));
+
+		StepVerifier.create(testConsumer.handleError(event, response, null)).expectNext(expected).verifyComplete();
+	}
+
+	// ==================== logResult ====================
+
+	@Test
+	void testLogResult_Success() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+		ResultDTO result = new ResultDTO(true, null);
+		when(receiverRecord.value()).thenReturn("{}");
+
+		assertDoesNotThrow(() -> testConsumer.logResult(result, event));
+	}
+
+	@Test
+	void testLogResult_Failure() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+		ResultDTO result = new ResultDTO(false, new RuntimeException("Error"));
+		when(receiverRecord.value()).thenReturn("{}");
+
+		assertDoesNotThrow(() -> testConsumer.logResult(result, event));
+	}
+
+	// ==================== saveEventAndAcknowledge ====================
+
+	@Test
+	void testSaveEventAndAcknowledge_Success() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+		AutoPaySynchLogResponse response = new AutoPaySynchLogResponse();
+
+		when(receiverRecord.receiverOffset()).thenReturn(receiverOffset);
+		when(commonActivityProcessor.saveEvent(eq(event), eq(SyncType.LEGACY_TO_MODERN))).thenReturn(Mono.just(response));
+
+		StepVerifier.create(testConsumer.saveEventAndAcknowledge(event, receiverRecord)).expectNext(response).verifyComplete();
+
+		verify(receiverOffset).acknowledge();
+	}
+
+	@Test
+	void testSaveEventAndAcknowledge_Failure() {
+		EventWithCorrelationData<TestEvent> event = new EventWithCorrelationData<>(new TestEvent(), "corr-123", Instant.now(), null, receiverRecord);
+
+		when(commonActivityProcessor.saveEvent(eq(event), eq(SyncType.LEGACY_TO_MODERN))).thenReturn(Mono.error(new RuntimeException("Save failed")));
+
+		StepVerifier.create(testConsumer.saveEventAndAcknowledge(event, receiverRecord)).expectError(RuntimeException.class).verify();
+	}
+
+	// ==================== processWithAck ====================
+
+	@Test
+	void testProcessWithAck_Success() {
+		String json = "{\"id\":\"123\",\"data\":\"test\"}";
+		AutoPaySynchLogResponse response = new AutoPaySynchLogResponse();
+		ResultDTO result = new ResultDTO(true, null);
+
+		when(receiverRecord.value()).thenReturn(json);
+		when(receiverRecord.key()).thenReturn("key");
+		when(receiverRecord.partition()).thenReturn(0);
+		when(receiverRecord.offset()).thenReturn(1L);
+		when(receiverRecord.topic()).thenReturn("topic");
+		when(receiverRecord.receiverOffset()).thenReturn(receiverOffset);
+		when(commonActivityProcessor.saveEvent(any(), eq(SyncType.LEGACY_TO_MODERN))).thenReturn(Mono.just(response));
+
+		testConsumer.setProcessResult(Mono.just(result));
+
+		StepVerifier.create(testConsumer.processWithAck(receiverRecord)).assertNext(event -> {
+			assertNotNull(event);
+			assertNotNull(event.getEvent());
+			assertEquals("123", event.getEvent().getId());
+		}).verifyComplete();
+	}
+
+	@Test
+	void testProcessWithAck_MappingError() {
+		String invalidJson = "invalid";
+		AutoPaySynchLogResponse response = new AutoPaySynchLogResponse();
+		ResultDTO errorResult = new ResultDTO(false, new RuntimeException());
+
+		when(receiverRecord.value()).thenReturn(invalidJson);
+		when(receiverRecord.key()).thenReturn("key");
+		when(receiverRecord.partition()).thenReturn(0);
+		when(receiverRecord.offset()).thenReturn(1L);
+		when(receiverRecord.topic()).thenReturn("topic");
+		when(receiverRecord.receiverOffset()).thenReturn(receiverOffset);
+		when(commonActivityProcessor.saveEvent(any(), eq(SyncType.LEGACY_TO_MODERN))).thenReturn(Mono.just(response));
+		when(commonActivityProcessor.handleError(any(), eq(response), eq(SyncType.LEGACY_TO_MODERN), any())).thenReturn(Mono.just(errorResult));
+
+		StepVerifier.create(testConsumer.processWithAck(receiverRecord)).assertNext(event -> {
+			assertNotNull(event);
+			assertNotNull(event.getError());
+		}).verifyComplete();
+	}
+
+	// ==================== generateUniqueCorrelationId ====================
+
+	@Test
+	void testGenerateUniqueCorrelationId_Uniqueness() {
+		String id1 = testConsumer.generateUniqueCorrelationId();
+		String id2 = testConsumer.generateUniqueCorrelationId();
+
+		assertNotNull(id1);
+		assertNotNull(id2);
+		assertNotEquals(id1, id2);
+	}
+
+	// ==================== isRetryableException ====================
+
+	@Test
+	void testIsRetryableException_Retryable() throws Exception {
+		var method = AbstractKafkaConsumer.class.getDeclaredMethod("isRetryableException", Throwable.class);
+		method.setAccessible(true);
+
+		assertTrue((boolean) method.invoke(testConsumer, new java.util.concurrent.TimeoutException()));
+		assertTrue((boolean) method.invoke(testConsumer, new CommitFailedException()));
+		assertTrue((boolean) method.invoke(testConsumer, new java.net.ConnectException()));
+	}
+
+	@Test
+	void testIsRetryableException_NonRetryable() throws Exception {
+		var method = AbstractKafkaConsumer.class.getDeclaredMethod("isRetryableException", Throwable.class);
+		method.setAccessible(true);
+
+		assertFalse((boolean) method.invoke(testConsumer, new Error("Fatal")));
+	}
+}
