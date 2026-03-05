@@ -1,0 +1,702 @@
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.util.Properties;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.hazelcast.client.HazelcastClient;
+import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.client.impl.connection.tcp.RoutingMode;
+import com.hazelcast.config.SSLConfig;
+import com.hazelcast.core.HazelcastInstance;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/** Configuration class for Hazelcast client setup in the autopay synchronization service. */
+@Slf4j
+@Configuration
+@RequiredArgsConstructor
+@EnableConfigurationProperties(HazelcastConfiguration.HazelcastConfigProperties.class)
+public class HazelcastConfiguration {
+
+```
+private final HazelcastConfigProperties properties;
+
+/** Configuration properties for Hazelcast client connection settings. */
+@Data
+@ConfigurationProperties(prefix = "hazelcast")
+public static class HazelcastConfigProperties {
+	private String clusterName;
+	private String address;
+	private String trustStorePath;
+	private String trustStorePassword;
+	private String username;
+	private String password;
+	private Boolean enabled;
+}
+
+/**
+ * Creates and configures a Hazelcast client instance as a Spring bean.
+ *
+ * @return HazelcastInstance
+ */
+@Bean
+@ConditionalOnProperty(name = "hazelcast.enabled", havingValue = "true", matchIfMissing = true)
+public HazelcastInstance hazelcastInstance() {
+	if (!properties.getEnabled()) {
+		log.info("Hazelcast is disabled via configuration");
+		return null;
+	}
+	log.info("Configuring Hazelcast client instance...");
+	try {
+		ClientConfig clientConfig = buildClientConfig();
+		HazelcastInstance instance = HazelcastClient.newHazelcastClient(clientConfig);
+		log.info("Hazelcast client instance configured successfully.");
+		return instance;
+	} catch (Exception e) {
+		log.warn("Error instantiating Hazelcast, error: {} cause: {}", e.getMessage(),
+				ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+	}
+	return null;
+}
+
+/**
+ * Builds the Hazelcast client configuration with security and network settings.
+ *
+ * @return ClientConfig
+ */
+private ClientConfig buildClientConfig() {
+	ClientConfig clientConfig = new ClientConfig();
+	clientConfig.setClusterName(properties.getClusterName());
+
+	// Network configuration
+	clientConfig.getNetworkConfig()
+			.addAddress(properties.getAddress())
+			.getClusterRoutingConfig()
+			.setRoutingMode(RoutingMode.ALL_MEMBERS);
+
+	// SSL configuration
+	log.info("Setting up hazelcast SSL configuration.");
+	Properties sslProps = new Properties();
+	sslProps.setProperty("trustStore", properties.getTrustStorePath());
+	sslProps.setProperty("trustStorePassword", properties.getTrustStorePassword());
+	clientConfig.getNetworkConfig()
+			.setSSLConfig(new SSLConfig().setEnabled(true).setProperties(sslProps));
+
+	// Security configuration
+	log.info("Setting up hazelcast security credentials.");
+	clientConfig.getSecurityConfig()
+			.setUsernamePasswordIdentityConfig(properties.getUsername(), properties.getPassword());
+
+	return clientConfig;
+}
+```
+
+}
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.util.Optional;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.core.HazelcastInstance;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@Component(“hazelcastHealthIndicator”)
+public class HazelcastHealthIndicator implements HealthIndicator {
+
+```
+private final Optional<HazelcastInstance> hazelcastInstance;
+
+public HazelcastHealthIndicator(
+		@Autowired(required = false) HazelcastInstance hazelcastInstance) {
+	this.hazelcastInstance = Optional.ofNullable(hazelcastInstance);
+	log.info("HazelcastHealthIndicator initialized with instance present: {}",
+			this.hazelcastInstance.isPresent());
+}
+
+@Override
+public Health health() {
+	try {
+		if (hazelcastInstance.isEmpty()) {
+			log.warn("Hazelcast instance not available - reporting UNKNOWN status");
+			return Health.unknown()
+					.withDetail("status", "Hazelcast not configured or disabled")
+					.withDetail("reason", "No HazelcastInstance bean found")
+					.build();
+		}
+
+		HazelcastInstance instance = hazelcastInstance.get();
+
+		// Check if Hazelcast is running
+		if (instance.getLifecycleService().isRunning()) {
+			log.debug("Hazelcast instance is running - reporting UP status");
+			return Health.up()
+					.withDetail("name", instance.getName())
+					.withDetail("memberCount", instance.getCluster().getMembers().size())
+					.withDetail("status", "Running")
+					.build();
+		} else {
+			log.warn("Hazelcast instance exists but is not running - reporting DOWN status");
+			return Health.down()
+					.withDetail("name", instance.getName())
+					.withDetail("status", "Not running")
+					.withDetail("reason", "Lifecycle service indicates instance is not running")
+					.build();
+		}
+
+	} catch (Exception e) {
+		log.error("Error checking Hazelcast health: {} cause: {}", e.getMessage(),
+				ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+		return Health.down()
+				.withException(e)
+				.withDetail("error", e.getMessage())
+				.withDetail("status", "Health check failed")
+				.build();
+	}
+}
+```
+
+}
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+
+- Wrapper processor for Hazelcast operations in the autopay synchronization system.
+- Provides safe access to Hazelcast distributed maps.
+- This component handles optional Hazelcast dependency injection and provides
+- error handling for distributed cache operations.
+  */
+  @Slf4j
+  @Component
+  public class HazelcastWrapperProcessor {
+  
+  private final HazelcastInstance hazelcastInstance;
+  private final boolean hazelcastAvailable;
+  
+  public HazelcastWrapperProcessor(
+  @Autowired(required = false) HazelcastInstance hazelcastInstance) {
+  this.hazelcastInstance = hazelcastInstance;
+  this.hazelcastAvailable = hazelcastInstance != null;
+  if (hazelcastAvailable) {
+  log.info(“HazelcastWrapperProcessor initialized with active Hazelcast instance”);
+  } else {
+  log.warn(“HazelcastWrapperProcessor initialized WITHOUT Hazelcast - will fall back to external service”);
+  }
+  }
+  
+  /**
+  - Retrieves a distributed map from Hazelcast by name with error handling.
+  - Returns null if Hazelcast is unavailable or if an error occurs during map retrieval.
+  - 
+  - @param mapName       the name of the distributed map to retrieve
+  - @param correlationId unique identifier for tracking this operation across logs
+  - @return the requested IMap containing GenericRecord values, or null if unavailable or on error
+    */
+    public IMap<String, GenericRecord> getMap(String mapName, String correlationId) {
+    try {
+    if (hazelcastAvailable) {
+    return hazelcastInstance.getMap(mapName);
+    }
+    return null;
+    } catch (Exception e) {
+    log.error(AutoPaySynchConstant.LOG_PREFIX
+    + “Error getting map {} from Hazelcast, error: {} cause: {}”,
+    correlationId, mapName, e.getMessage(),
+    ExceptionUtils.getStackTrace(e).replaceAll(”\r?\n”, “ “));
+    return null;
+    }
+    }
+    }
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+
+- Abstract base class for all Hazelcast-based ID lookup processors.
+- 
+- Provides the common Hazelcast -> ExternalCallService fallback flow:
+- 1. Try to resolve the ID from Hazelcast cache
+- 1. If cache miss -> fall back to external service call
+- 
+- Concrete subclasses implement what map/key to use and how to call
+- the external service fallback, keeping the main flow DRY.
+- 
+- @param <T> the type of ID returned (typically String)
+  */
+  @Slf4j
+  @RequiredArgsConstructor
+  public abstract class AbstractHazelcastLookupProcessor<T> {
+  
+  protected final HazelcastWrapperProcessor hazelcastWrapperProcessor;
+  protected final ExternalCallService externalCallService;
+  
+  /**
+  - Core lookup flow: tries Hazelcast first, falls back to external service on miss.
+  - 
+  - @param key           the ID to resolve
+  - @param syncType      LEGACY_TO_MODERN or MODERN_TO_LEGACY
+  - @param correlationId for distributed tracing
+  - @return Mono of resolved ID
+    */
+    protected Mono<T> convertId(String key, SyncType syncType, String correlationId) {
+    log.info(AutoPaySynchConstant.LOG_PREFIX + “convertId() called for {} [entity={}] key=’{}’”,
+    correlationId, syncType, getEntityType(), key);
+    
+    String mapName = getMapName(syncType);
+    String keyName = getKeyName(syncType);
+    
+    IMap<String, GenericRecord> map = hazelcastWrapperProcessor.getMap(mapName, correlationId);
+    
+    if (map != null) {
+    GenericRecord record = map.get(key);
+    if (record != null) {
+    log.info(AutoPaySynchConstant.LOG_PREFIX + “Hazelcast hit for {} [entity={}] key=’{}’”,
+    correlationId, syncType, getEntityType(), key);
+    return processRecord(record, syncType, correlationId, keyName)
+    .switchIfEmpty(Mono.defer(() -> {
+    log.warn(AutoPaySynchConstant.LOG_PREFIX
+    + “Hazelcast record empty for {} [entity={}] key=’{}’, falling back to external service”,
+    correlationId, syncType, getEntityType(), key);
+    return callExternalService(key, syncType, correlationId);
+    }));
+    }
+    }
+    
+    log.info(AutoPaySynchConstant.LOG_PREFIX + “Hazelcast miss for {} [entity={}] key=’{}’, calling external service”,
+    correlationId, syncType, getEntityType(), key);
+    return callExternalService(key, syncType, correlationId);
+    }
+  
+  /**
+  - Returns the Hazelcast map name to use for the given sync direction.
+    */
+    protected abstract String getMapName(SyncType syncType);
+  
+  /**
+  - Returns the field key name to extract from the GenericRecord.
+    */
+    protected abstract String getKeyName(SyncType syncType);
+  
+  /**
+  - Returns a human-readable entity type label for logging (e.g. “CUSTOMER”, “AGENT”).
+    */
+    protected abstract String getEntityType();
+  
+  /**
+  - Extracts and returns the ID value from the Hazelcast GenericRecord.
+    */
+    protected abstract Mono<T> processRecord(GenericRecord record, SyncType syncType,
+    String correlationId, String keyName);
+  
+  /**
+  - Calls the appropriate ExternalCallService method as a Hazelcast fallback.
+    */
+    protected abstract Mono<T> callExternalService(String key, SyncType syncType, String correlationId);
+
+}
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.StringUtils;
+
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.PageUserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponseMetaData;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkage;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponseContentInner;
+
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+
+- Service responsible for all external HTTP API calls in the autopay synchronization system.
+- Converts legacy IDs to modern IDs (and vice versa) by calling:
+- - Credit Account Service       → getModernCreditAccountId()
+- - CIAM / Customer Domain Service → convertCustomerId()
+- - Agent ID Fallback Service     → convertAgentId()
+    */
+    @Slf4j
+    @Component
+    @RefreshScope
+    @RequiredArgsConstructor
+    @EnableConfigurationProperties(ExternalCallService.ExternalServiceConfig.class)
+    public class ExternalCallService {
+
+```
+private final ExternalServiceConfig externalServiceConfig;
+private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+// ─────────────────────────────────────────────────────────────
+// External Service Config Properties
+// ─────────────────────────────────────────────────────────────
+
+@Data
+@ConfigurationProperties(prefix = "external-service")
+public static class ExternalServiceConfig {
+
+	private CiamConfig ciam;
+	private CreditAccountConfig creditAccount;
+	private AgentFallbackConfig agentFallback;
+
+	@Data
+	public static class CiamConfig {
+		private String host;
+		private String productsUri;
+		private String apikey;
+	}
+
+	@Data
+	public static class CreditAccountConfig {
+		private String host;
+		private String accountsUri;
+		private String apikey;
+	}
+
+	@Data
+	public static class AgentFallbackConfig {
+		private String host;
+		private String apikey;
+		private String hazelcastAgentIdFallbackServiceUri;
+	}
+
+}
+
+// ─────────────────────────────────────────────────────────────
+// getModernCreditAccountId
+// Calls: Credit Account Service
+// Lead's instruction: externalcallservice -> getModernCreditAccountId(legacyCreditAccountId)
+// ─────────────────────────────────────────────────────────────
+
+public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
+	log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to getModernCreditAccountId() for modernCustomerId: {}",
+			correlationId, modernCustomerId);
+
+	var headers = createHeaders(externalServiceConfig.getCreditAccount().getApikey(), correlationId);
+	var params = new LinkedMultiValueMap<String, String>();
+	params.add("individualId", modernCustomerId);
+
+	String url = externalServiceConfig.getCreditAccount().getHost()
+			+ externalServiceConfig.getCreditAccount().getAccountsUri();
+
+	return autoPaySyncClientHandler.get(url, headers, "credit-account-service", params)
+			.bodyToMono(AccountsDetailsResponse.class)
+			.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+					+ "Response from getModernCreditAccountId() for modernCustomerId: {}: {}",
+					correlationId, modernCustomerId, response))
+			.flatMap(response -> extractModernCreditAccountId(response, modernCustomerId, correlationId))
+			.onErrorResume(err -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "Error in getModernCreditAccountId() for modernCustomerId: {}, Error: {}",
+						correlationId, modernCustomerId, err.getMessage());
+				return Mono.error(err);
+			});
+}
+
+private Mono<AccountIdDto> extractModernCreditAccountId(AccountsDetailsResponse response,
+		String modernCustomerId, String correlationId) {
+	if (response == null) {
+		return Mono.error(new AutoPaySynchException(
+				"Null response from Credit Account Service for modernCustomerId: " + modernCustomerId,
+				correlationId));
+	}
+
+	List<AccountsDetailsResponseContentInner> content = response.getContent();
+	if (content == null || content.isEmpty()) {
+		return Mono.error(new AutoPaySynchException(
+				"No account data found for modernCustomerId: " + modernCustomerId, correlationId));
+	}
+
+	return content.stream()
+			.filter(Objects::nonNull)
+			.map(AccountsDetailsResponseContentInner::getAccountId)
+			.filter(Objects::nonNull)
+			.map(Object::toString)
+			.filter(StringUtils::hasText)
+			.findFirst()
+			.map(AccountIdDto::new)
+			.map(Mono::just)
+			.orElseGet(() -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "No modern credit account ID found for modernCustomerId: {}",
+						correlationId, modernCustomerId);
+				return Mono.error(new AutoPaySynchException(
+						"No modern credit account ID found for modernCustomerId: " + modernCustomerId,
+						correlationId));
+			});
+}
+
+// ─────────────────────────────────────────────────────────────
+// convertCustomerId
+// Calls: CIAM / Customer Domain Service
+// Fallback for: CustomerMappingProcessor
+// ─────────────────────────────────────────────────────────────
+
+public Mono<String> convertCustomerId(String customerId, SyncType syncType, String correlationId) {
+	log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertCustomerId() for {} for customerId: {}",
+			correlationId, syncType, customerId);
+
+	var headers = createHeaders(externalServiceConfig.getCiam().getApikey(), correlationId);
+	var params = new LinkedMultiValueMap<String, String>();
+
+	if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+		params.add("systemCustomerId", customerId);
+	} else {
+		params.add("individualUniqueIdentifier", customerId);
+	}
+
+	String url = externalServiceConfig.getCiam().getHost()
+			+ externalServiceConfig.getCiam().getProductsUri();
+
+	return autoPaySyncClientHandler.get(url, headers, "customer-domain-service", params)
+			.bodyToMono(SystemLinkagesResponse.class)
+			.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+					+ "Response from convertCustomerId() for {}: {}", correlationId, syncType, response))
+			.flatMap(response -> extractCustomerIdFromResponse(response, syncType, customerId, correlationId))
+			.onErrorResume(err -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "Error in convertCustomerId() for {}, Error: {}",
+						correlationId, syncType, err.getMessage());
+				return Mono.error(err);
+			});
+}
+
+private Mono<String> extractCustomerIdFromResponse(SystemLinkagesResponse response, SyncType syncType,
+		String customerId, String correlationId) {
+	if (response == null) {
+		return Mono.error(new AutoPaySynchException(
+				"Null response from CIAM service for customerId: " + customerId, correlationId));
+	}
+
+	List<SystemLinkage> content = response.getContent();
+	if (content == null || content.isEmpty()) {
+		return Mono.error(new AutoPaySynchException(
+				"No system linkage data found for customerId: " + customerId + " syncType: " + syncType,
+				correlationId));
+	}
+
+	return switch (syncType) {
+		case LEGACY_TO_MODERN -> extractModernCustomerId(content, customerId, correlationId);
+		case MODERN_TO_LEGACY -> extractLegacyCustomerId(content, customerId, correlationId);
+	};
+}
+
+private Mono<String> extractModernCustomerId(List<SystemLinkage> content, String customerId,
+		String correlationId) {
+	return content.stream()
+			.filter(Objects::nonNull)
+			.map(SystemLinkage::getIndividualUniqueIdentifier)
+			.filter(Objects::nonNull)
+			.map(Object::toString)
+			.filter(StringUtils::hasText)
+			.findFirst()
+			.map(Mono::just)
+			.orElseGet(() -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "No modern customer ID found for legacyCustomerId: {}",
+						correlationId, customerId);
+				return Mono.error(new AutoPaySynchException(
+						"No modern customer ID found for legacyCustomerId: " + customerId, correlationId));
+			});
+}
+
+private Mono<String> extractLegacyCustomerId(List<SystemLinkage> content, String customerId,
+		String correlationId) {
+	return content.stream()
+			.filter(Objects::nonNull)
+			.map(SystemLinkage::getSystemCustomerId)
+			.filter(StringUtils::hasText)
+			.findFirst()
+			.map(Mono::just)
+			.orElseGet(() -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "No legacy customer ID found for modernCustomerId: {}",
+						correlationId, customerId);
+				return Mono.error(new AutoPaySynchException(
+						"No legacy customer ID found for modernCustomerId: " + customerId, correlationId));
+			});
+}
+
+// ─────────────────────────────────────────────────────────────
+// convertAgentId
+// Calls: Agent ID Fallback Service
+// Fallback for: AgentMappingProcessor
+// ─────────────────────────────────────────────────────────────
+
+public Mono<String> convertAgentId(String agentId, SyncType syncType, String correlationId) {
+	log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertAgentId() for {} for agentId: {}",
+			correlationId, syncType, agentId);
+
+	var headers = new HashMap<String, String>();
+	headers.put(AutoPaySynchConstant.CORRELATION_ID, correlationId);
+	headers.put("apiKey", externalServiceConfig.getAgentFallback().getApikey());
+	headers.put("requestedBy", AutoPaySynchConstant.AUTOPAY_SYNCH_SERVICE);
+
+	var params = new LinkedMultiValueMap<String, String>();
+	if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+		params.add("casId", agentId);
+	} else {
+		params.add("userUniqueIdentifier", agentId);
+	}
+
+	String url = externalServiceConfig.getAgentFallback().getHost()
+			+ externalServiceConfig.getAgentFallback().getHazelcastAgentIdFallbackServiceUri();
+
+	return autoPaySyncClientHandler.get(url, headers, "agent-id-fallback-service", params)
+			.bodyToMono(PageUserResponse.class)
+			.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+					+ "Response from convertAgentId() for {}: {}", correlationId, syncType, response))
+			.flatMap(response -> extractAgentIdFromResponse(response, syncType, agentId, correlationId))
+			.onErrorResume(err -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "Error in convertAgentId() for {}, Error: {}",
+						correlationId, syncType, err.getMessage());
+				return Mono.error(err);
+			});
+}
+
+private Mono<String> extractAgentIdFromResponse(PageUserResponse response, SyncType syncType,
+		String agentId, String correlationId) {
+	if (response == null) {
+		return Mono.error(new AutoPaySynchException(
+				"Null response from Agent ID Fallback Service for agentId: " + agentId, correlationId));
+	}
+
+	List<UserResponse> content = response.getContent();
+	if (content == null || content.isEmpty()) {
+		return Mono.error(new AutoPaySynchException(
+				"No user data found for agentId: " + agentId + " syncType: " + syncType, correlationId));
+	}
+
+	return switch (syncType) {
+		case LEGACY_TO_MODERN -> extractModernAgentId(content, agentId, correlationId);
+		case MODERN_TO_LEGACY -> extractLegacyAgentId(content, agentId, correlationId);
+	};
+}
+
+private Mono<String> extractModernAgentId(List<UserResponse> content, String agentId, String correlationId) {
+	return content.stream()
+			.filter(Objects::nonNull)
+			.map(UserResponse::getUniqueIdentifier)
+			.filter(Objects::nonNull)
+			.map(Object::toString)
+			.filter(StringUtils::hasText)
+			.findFirst()
+			.map(Mono::just)
+			.orElseGet(() -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "No modern agent ID found for legacy casId: {}", correlationId, agentId);
+				return Mono.error(new AutoPaySynchException(
+						"No modern agent ID found for legacy casId: " + agentId, correlationId));
+			});
+}
+
+private Mono<String> extractLegacyAgentId(List<UserResponse> content, String agentId, String correlationId) {
+	return content.stream()
+			.filter(Objects::nonNull)
+			.map(UserResponse::getMetaData)
+			.filter(Objects::nonNull)
+			.map(UserResponseMetaData::getCasId)
+			.filter(StringUtils::hasText)
+			.findFirst()
+			.map(Mono::just)
+			.orElseGet(() -> {
+				log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "No legacy casId found for modern agentId: {}", correlationId, agentId);
+				return Mono.error(new AutoPaySynchException(
+						"No legacy casId found for modern agentId: " + agentId, correlationId));
+			});
+}
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+private Map<String, String> createHeaders(String apiKey, String correlationId) {
+	return Map.of("apiKey", apiKey, AutoPaySynchConstant.CORRELATION_ID, correlationId);
+}
+```
+
+}
+
+
+
+
+
