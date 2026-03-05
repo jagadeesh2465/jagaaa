@@ -553,3 +553,515 @@ public class AgentMappingPropertiesConfig {
 	}
 
 }
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.config.CustomerMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Processor for resolving modern/legacy Customer IDs.
+ * Strategy:
+ *   1. Try Hazelcast cache first (fast path)
+ *   2. Fall back to ExternalCallService (CIAM / Customer Domain Service) if not found
+ *
+ * Follows the same pattern as AgentLookupProcessor in debit-card-payment-sync-service.
+ * Referenced in lead's instructions:
+ *   CustomerMappingProcessor -> getModernCustomerId(legacyCustomerId) -> hazelcast -> fallback
+ */
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(CustomerMappingPropertiesConfig.class)
+public class CustomerMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
+
+	private final CustomerMappingPropertiesConfig config;
+
+	public CustomerMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor, ExternalCallService externalCallService, CustomerMappingPropertiesConfig config) {
+		super(hazelcastWrapperProcessor, externalCallService);
+		this.config = config;
+	}
+
+	/**
+	 * Resolves the modern customer UUID for a given legacy customer ID.
+	 * Tries Hazelcast first, falls back to ExternalCallService (CIAM).
+	 *
+	 * @param legacyCustomerId the legacy customer ID
+	 * @param correlationId    for distributed tracing
+	 * @return Mono of modern customer UUID string
+	 */
+	public Mono<String> getModernCustomerId(String legacyCustomerId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern customer ID for legacyCustomerId: {}", correlationId, legacyCustomerId);
+		return convertId(legacyCustomerId, SyncType.LEGACY_TO_MODERN, correlationId);
+	}
+
+	@Override
+	protected String getMapName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getMapName() : config.getLegacyToModern().getMapName();
+	}
+
+	@Override
+	protected String getKeyName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getKeyName() : config.getLegacyToModern().getKeyName();
+	}
+
+	@Override
+	protected String getEntityType() {
+		return "CUSTOMER";
+	}
+
+	@Override
+	protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+		String customerId = record.getString(keyName);
+		if (customerId == null || customerId.trim().isEmpty()) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Customer ID is null or empty for keyName '{}' for {}", correlationId, keyName, syncType);
+			return Mono.empty();
+		}
+
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved customer ID for {} from Hazelcast: {}", correlationId, syncType, customerId);
+		return Mono.just(customerId.trim());
+	}
+
+	@Override
+	protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+		return externalCallService.convertCustomerId(key, syncType, correlationId);
+	}
+
+}
+
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.config.AgentMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Processor for resolving modern/legacy Agent IDs.
+ * Strategy:
+ *   1. Try Hazelcast cache first (fast path)
+ *   2. Fall back to ExternalCallService if not found in cache
+ *
+ * Follows the same pattern as AgentLookupProcessor in debit-card-payment-sync-service.
+ */
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(AgentMappingPropertiesConfig.class)
+public class AgentMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
+
+	private final AgentMappingPropertiesConfig config;
+
+	public AgentMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor, ExternalCallService externalCallService, AgentMappingPropertiesConfig config) {
+		super(hazelcastWrapperProcessor, externalCallService);
+		this.config = config;
+	}
+
+	/**
+	 * Resolves the modern agent UUID for a given legacy agent ID.
+	 * Tries Hazelcast first, falls back to ExternalCallService.
+	 *
+	 * @param legacyAgentId the legacy agent ID
+	 * @param correlationId for distributed tracing
+	 * @return Mono of modern agent UUID string
+	 */
+	public Mono<String> getModernAgentId(String legacyAgentId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern agent ID for legacyAgentId: {}", correlationId, legacyAgentId);
+		return convertId(legacyAgentId, SyncType.LEGACY_TO_MODERN, correlationId);
+	}
+
+	@Override
+	protected String getMapName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getMapName() : config.getLegacyToModern().getMapName();
+	}
+
+	@Override
+	protected String getKeyName(SyncType syncType) {
+		return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getKeyName() : config.getLegacyToModern().getKeyName();
+	}
+
+	@Override
+	protected String getEntityType() {
+		return AutoPaySynchConstant.AUTOPAY_SYNCH_SERVICE;
+	}
+
+	@Override
+	protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+		String agentId = record.getString(keyName);
+		if (agentId == null || agentId.trim().isEmpty()) {
+			log.warn(AutoPaySynchConstant.LOG_PREFIX + "Agent ID is null or empty for keyName '{}' for {}", correlationId, keyName, syncType);
+			return Mono.empty();
+		}
+
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved agent ID for {} from Hazelcast: {}", correlationId, syncType, agentId);
+		return Mono.just(agentId.trim());
+	}
+
+	@Override
+	protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+		return externalCallService.convertAgentId(key, syncType, correlationId);
+	}
+
+}
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.StringUtils;
+
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.dto.CoopUserPageResponse;
+import com.creditone.ucrm.autopaysynch.dto.CoopUserPageResponse.CoopUserResponse;
+import com.creditone.ucrm.autopaysynch.dto.CreditAccountsResponse;
+import com.creditone.ucrm.autopaysynch.dto.CreditAccountsResponse.AccountDetail;
+import com.creditone.ucrm.autopaysynch.dto.SystemLinkagesResponse;
+import com.creditone.ucrm.autopaysynch.dto.SystemLinkagesResponse.SystemLinkage;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Service responsible for all external HTTP API calls in the autopay synchronization system.
+ * Follows the exact same pattern as ExternalCallService in debit-card-payment-sync-service.
+ *
+ * 3 methods matching the processor fallbacks:
+ *   1. getModernCreditAccountId() -> Credit Account Service
+ *   2. convertCustomerId()        -> Customer Domain Service (fallback for CustomerMappingProcessor)
+ *   3. convertAgentId()           -> Co-Op User Admin Service (fallback for AgentMappingProcessor)
+ */
+@Slf4j
+@Component
+@RefreshScope
+@RequiredArgsConstructor
+@EnableConfigurationProperties(ExternalCallService.ExternalServiceConfig.class)
+public class ExternalCallService {
+
+	private final ExternalServiceConfig externalServiceConfig;
+	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+	// ─────────────────────────────────────────────────────────────
+	// Config Properties
+	// ─────────────────────────────────────────────────────────────
+
+	@Data
+	@ConfigurationProperties(prefix = "external-service")
+	public static class ExternalServiceConfig {
+
+		private CustomerDomainConfig customerDomain;
+		private CreditAccountConfig creditAccount;
+		private CoopUserAdminConfig coopUserAdmin;
+
+		@Data
+		public static class CustomerDomainConfig {
+			private String host;
+			private String systemLinkagesUri;
+			private String apikey;
+		}
+
+		@Data
+		public static class CreditAccountConfig {
+			private String host;
+			private String accountsUri;
+			private String apikey;
+		}
+
+		@Data
+		public static class CoopUserAdminConfig {
+			private String host;
+			private String usersUri;
+			private String apikey;
+			private String requestedBy;
+		}
+
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// 1. getModernCreditAccountId
+	//    Calls: Credit Account Service
+	//    GET /private/creditcard/accounts?individualId={modernCustomerId}
+	// ─────────────────────────────────────────────────────────────
+
+	public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to getModernCreditAccountId() for modernCustomerId: {}",
+				correlationId, modernCustomerId);
+
+		var headers = createHeaders(externalServiceConfig.getCreditAccount().getApikey(), correlationId);
+		var params = new LinkedMultiValueMap<String, String>();
+		params.add("individualId", modernCustomerId);
+
+		String url = externalServiceConfig.getCreditAccount().getHost()
+				+ externalServiceConfig.getCreditAccount().getAccountsUri();
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "credit-account-service", params)
+				.bodyToMono(CreditAccountsResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from getModernCreditAccountId() for modernCustomerId: {}: {}",
+						correlationId, modernCustomerId, response))
+				.flatMap(response -> extractModernCreditAccountId(response, modernCustomerId, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error in getModernCreditAccountId() for modernCustomerId: {}, Error: {}",
+							correlationId, modernCustomerId, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<AccountIdDto> extractModernCreditAccountId(CreditAccountsResponse response,
+			String modernCustomerId, String correlationId) {
+		if (response == null) {
+			return Mono.error(new AutoPaySynchException(
+					"Null response from Credit Account Service for modernCustomerId: " + modernCustomerId, correlationId));
+		}
+		List<AccountDetail> content = response.getContent();
+		if (content == null || content.isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No account data found for modernCustomerId: " + modernCustomerId, correlationId));
+		}
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(AccountDetail::getAccountId)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(AccountIdDto::new)
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "No modern credit account ID found for modernCustomerId: {}",
+							correlationId, modernCustomerId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern credit account ID found for modernCustomerId: " + modernCustomerId, correlationId));
+				});
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// 2. convertCustomerId
+	//    Calls: Customer Domain Service
+	//    GET /systemlinkages?systemCustomerId={legacyCustomerId}
+	//    Fallback for: CustomerMappingProcessor
+	// ─────────────────────────────────────────────────────────────
+
+	public Mono<String> convertCustomerId(String customerId, SyncType syncType, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertCustomerId() for {} for customerId: {}",
+				correlationId, syncType, customerId);
+
+		var headers = createHeaders(externalServiceConfig.getCustomerDomain().getApikey(), correlationId);
+		var params = new LinkedMultiValueMap<String, String>();
+		if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+			params.add("systemCustomerId", customerId);
+		} else {
+			params.add("individualUniqueIdentifier", customerId);
+		}
+
+		String url = externalServiceConfig.getCustomerDomain().getHost()
+				+ externalServiceConfig.getCustomerDomain().getSystemLinkagesUri();
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "customer-domain-service", params)
+				.bodyToMono(SystemLinkagesResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from convertCustomerId() for {}: {}", correlationId, syncType, response))
+				.flatMap(response -> extractCustomerIdFromResponse(response, syncType, customerId, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in convertCustomerId() for {}, Error: {}",
+							correlationId, syncType, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<String> extractCustomerIdFromResponse(SystemLinkagesResponse response, SyncType syncType,
+			String customerId, String correlationId) {
+		if (response == null) {
+			return Mono.error(new AutoPaySynchException(
+					"Null response from Customer Domain Service for customerId: " + customerId, correlationId));
+		}
+		List<SystemLinkage> content = response.getContent();
+		if (content == null || content.isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No system linkage data found for customerId: " + customerId + " syncType: " + syncType, correlationId));
+		}
+		return switch (syncType) {
+			case LEGACY_TO_MODERN -> extractModernCustomerId(content, customerId, correlationId);
+			case MODERN_TO_LEGACY -> extractLegacyCustomerId(content, customerId, correlationId);
+		};
+	}
+
+	private Mono<String> extractModernCustomerId(List<SystemLinkage> content, String customerId, String correlationId) {
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(SystemLinkage::getIndividualUniqueIdentifier)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "No modern customer ID found for legacyCustomerId: {}",
+							correlationId, customerId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern customer ID found for legacyCustomerId: " + customerId, correlationId));
+				});
+	}
+
+	private Mono<String> extractLegacyCustomerId(List<SystemLinkage> content, String customerId, String correlationId) {
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(SystemLinkage::getSystemCustomerId)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "No legacy customer ID found for modernCustomerId: {}",
+							correlationId, customerId);
+					return Mono.error(new AutoPaySynchException(
+							"No legacy customer ID found for modernCustomerId: " + customerId, correlationId));
+				});
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// 3. convertAgentId
+	//    Calls: Co-Op User Admin Service
+	//    GET /users?casId={legacyAgentId}
+	//    Fallback for: AgentMappingProcessor
+	// ─────────────────────────────────────────────────────────────
+
+	public Mono<String> convertAgentId(String agentId, SyncType syncType, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertAgentId() for {} for agentId: {}",
+				correlationId, syncType, agentId);
+
+		var headers = new HashMap<String, String>();
+		headers.put("apiKey", externalServiceConfig.getCoopUserAdmin().getApikey());
+		headers.put(AutoPaySynchConstant.CORRELATION_ID, correlationId);
+		headers.put("requestedBy", externalServiceConfig.getCoopUserAdmin().getRequestedBy());
+
+		var params = new LinkedMultiValueMap<String, String>();
+		if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+			params.add("casId", agentId);
+		} else {
+			params.add("userUniqueIdentifier", agentId);
+		}
+
+		String url = externalServiceConfig.getCoopUserAdmin().getHost()
+				+ externalServiceConfig.getCoopUserAdmin().getUsersUri();
+
+		return autoPaySyncClientHandler.webClientGet(url, headers, "co-op-user-admin-service", params)
+				.bodyToMono(CoopUserPageResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from convertAgentId() for {}: {}", correlationId, syncType, response))
+				.flatMap(response -> extractAgentIdFromResponse(response, syncType, agentId, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in convertAgentId() for {}, Error: {}",
+							correlationId, syncType, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<String> extractAgentIdFromResponse(CoopUserPageResponse response, SyncType syncType,
+			String agentId, String correlationId) {
+		if (response == null) {
+			return Mono.error(new AutoPaySynchException(
+					"Null response from Co-Op User Admin Service for agentId: " + agentId, correlationId));
+		}
+		List<CoopUserResponse> content = response.getContent();
+		if (content == null || content.isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No user data found for agentId: " + agentId + " syncType: " + syncType, correlationId));
+		}
+		return switch (syncType) {
+			case LEGACY_TO_MODERN -> extractModernAgentId(content, agentId, correlationId);
+			case MODERN_TO_LEGACY -> extractLegacyAgentId(content, agentId, correlationId);
+		};
+	}
+
+	private Mono<String> extractModernAgentId(List<CoopUserResponse> content, String agentId, String correlationId) {
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(CoopUserResponse::getUniqueIdentifier)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "No modern agent ID found for legacy casId: {}",
+							correlationId, agentId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern agent ID found for legacy casId: " + agentId, correlationId));
+				});
+	}
+
+	private Mono<String> extractLegacyAgentId(List<CoopUserResponse> content, String agentId, String correlationId) {
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(CoopUserResponse::getMetaData)
+				.filter(Objects::nonNull)
+				.map(CoopUserPageResponse.CoopUserMetaData::getCasId)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "No legacy casId found for modern agentId: {}",
+							correlationId, agentId);
+					return Mono.error(new AutoPaySynchException(
+							"No legacy casId found for modern agentId: " + agentId, correlationId));
+				});
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Helpers
+	// ─────────────────────────────────────────────────────────────
+
+	private Map<String, String> createHeaders(String apiKey, String correlationId) {
+		return Map.of("apiKey", apiKey, AutoPaySynchConstant.CORRELATION_ID, correlationId);
+	}
+
+}
