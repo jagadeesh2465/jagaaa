@@ -15,8 +15,8 @@ import org.springframework.util.StringUtils;
 import com.creditone.swagger.agentidfallbackservice.dtoswagger.PageUserResponse;
 import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponse;
 import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponseMetaData;
-import com.creditone.swagger.ciam.dtoswagger.PageSystemLinkage;
 import com.creditone.swagger.ciam.dtoswagger.SystemLinkage;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse;
 import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse;
 import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponseContentInner;
 
@@ -49,7 +49,7 @@ public class ExternalCallService {
 	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
 
 	// ─────────────────────────────────────────────────────────────
-	// Config Properties
+	// External Service Config Properties
 	// ─────────────────────────────────────────────────────────────
 
 	@Data
@@ -85,8 +85,8 @@ public class ExternalCallService {
 
 	// ─────────────────────────────────────────────────────────────
 	// getModernCreditAccountId
-	// Lead's instruction: externalcallservice -> getModernCreditAccountId(legacyCreditAccountId)
 	// Calls: Credit Account Service
+	// Lead's instruction: externalcallservice -> getModernCreditAccountId(legacyCreditAccountId)
 	// ─────────────────────────────────────────────────────────────
 
 	public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
@@ -170,18 +170,19 @@ public class ExternalCallService {
 				+ externalServiceConfig.getCiam().getProductsUri();
 
 		return autoPaySyncClientHandler.webClientGet(url, headers, "customer-domain-service", params)
-				.bodyToMono(PageSystemLinkage.class)
+				.bodyToMono(SystemLinkagesResponse.class)
 				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
 						+ "Response from convertCustomerId() for {}: {}", correlationId, syncType, response))
 				.flatMap(response -> extractCustomerIdFromResponse(response, syncType, customerId, correlationId))
 				.onErrorResume(err -> {
-					log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in convertCustomerId() for {}, Error: {}",
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error in convertCustomerId() for {}, Error: {}",
 							correlationId, syncType, err.getMessage());
 					return Mono.error(err);
 				});
 	}
 
-	private Mono<String> extractCustomerIdFromResponse(PageSystemLinkage response, SyncType syncType,
+	private Mono<String> extractCustomerIdFromResponse(SystemLinkagesResponse response, SyncType syncType,
 			String customerId, String correlationId) {
 		if (response == null) {
 			return Mono.error(new AutoPaySynchException(
@@ -205,16 +206,16 @@ public class ExternalCallService {
 			String correlationId) {
 		return content.stream()
 				.filter(Objects::nonNull)
-				.filter(sl -> sl.getSystemType() != null && sl.getSystemType().equalsIgnoreCase("CAS"))
 				.map(SystemLinkage::getIndividualUniqueIdentifier)
 				.filter(Objects::nonNull)
-				.map(uuid -> uuid.toString())
+				.map(Object::toString)
 				.filter(StringUtils::hasText)
 				.findFirst()
 				.map(Mono::just)
 				.orElseGet(() -> {
 					log.error(AutoPaySynchConstant.LOG_PREFIX
-							+ "No modern customer ID found for legacyCustomerId: {}", correlationId, customerId);
+							+ "No modern customer ID found for legacyCustomerId: {}",
+							correlationId, customerId);
 					return Mono.error(new AutoPaySynchException(
 							"No modern customer ID found for legacyCustomerId: " + customerId, correlationId));
 				});
@@ -224,14 +225,14 @@ public class ExternalCallService {
 			String correlationId) {
 		return content.stream()
 				.filter(Objects::nonNull)
-				.filter(sl -> sl.getSystemType() != null && "CAS".equalsIgnoreCase(sl.getSystemType().trim()))
 				.map(SystemLinkage::getSystemCustomerId)
 				.filter(StringUtils::hasText)
 				.findFirst()
 				.map(Mono::just)
 				.orElseGet(() -> {
 					log.error(AutoPaySynchConstant.LOG_PREFIX
-							+ "No legacy customer ID found for modernCustomerId: {}", correlationId, customerId);
+							+ "No legacy customer ID found for modernCustomerId: {}",
+							correlationId, customerId);
 					return Mono.error(new AutoPaySynchException(
 							"No legacy customer ID found for modernCustomerId: " + customerId, correlationId));
 				});
@@ -248,8 +249,8 @@ public class ExternalCallService {
 				correlationId, syncType, agentId);
 
 		var headers = new HashMap<String, String>();
-		headers.put("apiKey", externalServiceConfig.getHazelcast().getApikey());
 		headers.put(AutoPaySynchConstant.CORRELATION_ID, correlationId);
+		headers.put("apiKey", externalServiceConfig.getHazelcast().getApikey());
 		headers.put("requestedBy", AutoPaySynchConstant.AUTOPAY_SYNCH_SERVICE);
 
 		var params = new LinkedMultiValueMap<String, String>();
@@ -264,9 +265,12 @@ public class ExternalCallService {
 
 		return autoPaySyncClientHandler.webClientGet(url, headers, "agent-id-fallback-service", params)
 				.bodyToMono(PageUserResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from convertAgentId() for {}: {}", correlationId, syncType, response))
 				.flatMap(response -> extractAgentIdFromResponse(response, syncType, agentId, correlationId))
 				.onErrorResume(err -> {
-					log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in convertAgentId() for {}, Error: {}",
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error in convertAgentId() for {}, Error: {}",
 							correlationId, syncType, err.getMessage());
 					return Mono.error(err);
 				});
@@ -296,7 +300,7 @@ public class ExternalCallService {
 				.filter(Objects::nonNull)
 				.map(UserResponse::getUniqueIdentifier)
 				.filter(Objects::nonNull)
-				.map(uuid -> uuid.toString())
+				.map(Object::toString)
 				.filter(StringUtils::hasText)
 				.findFirst()
 				.map(Mono::just)
