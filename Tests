@@ -1,0 +1,194 @@
+@ExtendWith(MockitoExtension.class)
+class HazelcastWrapperProcessorTest {
+
+    @Mock
+    HazelcastInstance hazelcastInstance;
+
+    @Mock
+    IMap<String, GenericRecord> map;
+
+    @InjectMocks
+    HazelcastWrapperProcessor processor;
+
+    // TEST 1 — record found in Hazelcast
+    @Test
+    void getRecord_whenRecordExists_returnsRecord() {
+        // ARRANGE
+        GenericRecord mockRecord = mock(GenericRecord.class);
+        when(hazelcastInstance.getMap("AUTOPAY_CUSTOMER_LTM_MAP"))
+            .thenReturn(map);
+        when(map.get("12345")).thenReturn(mockRecord);
+
+        // ACT
+        GenericRecord result = processor.getRecord(
+            "AUTOPAY_CUSTOMER_LTM_MAP", "12345", "corr-001");
+
+        // ASSERT
+        assertNotNull(result);
+        assertEquals(mockRecord, result);
+    }
+
+    // TEST 2 — record NOT found
+    @Test
+    void getRecord_whenRecordNotFound_returnsNull() {
+        when(hazelcastInstance.getMap("AUTOPAY_CUSTOMER_LTM_MAP"))
+            .thenReturn(map);
+        when(map.get("99999")).thenReturn(null);
+
+        GenericRecord result = processor.getRecord(
+            "AUTOPAY_CUSTOMER_LTM_MAP", "99999", "corr-001");
+
+        assertNull(result);
+    }
+
+    // TEST 3 — Hazelcast is DOWN
+    @Test
+    void getRecord_whenHazelcastDown_returnsNull() {
+        when(hazelcastInstance.getMap(any()))
+            .thenThrow(new RuntimeException("Hazelcast unavailable"));
+
+        // Should NOT throw — should return null gracefully
+        GenericRecord result = processor.getRecord(
+            "AUTOPAY_CUSTOMER_LTM_MAP", "12345", "corr-001");
+
+        assertNull(result);
+    }
+}
+
+
+
+
+@ExtendWith(MockitoExtension.class)
+class CustomerMappingProcessorTest {
+
+    @Mock
+    HazelcastWrapperProcessor hazelcastWrapperProcessor;
+
+    @Mock
+    ExternalCallService externalCallService;
+
+    @Mock
+    CustomerMappingPropertiesConfig config;
+
+    @InjectMocks
+    CustomerMappingProcessor processor;
+
+    // TEST 1 — Hazelcast HIT
+    @Test
+    void getModernCustomerId_whenHazelcastHit_returnsModernId() {
+        // ARRANGE
+        GenericRecord mockRecord = mock(GenericRecord.class);
+        when(mockRecord.getString("modernCustomerId"))
+            .thenReturn("uuid-abc-123");
+        when(hazelcastWrapperProcessor.getRecord(any(), any(), any()))
+            .thenReturn(mockRecord);
+
+        // ACT + ASSERT
+        StepVerifier.create(
+            processor.getModernCustomerId("12345", "corr-001"))
+            .expectNext("uuid-abc-123")
+            .verifyComplete();
+
+        // External service should NEVER be called
+        verify(externalCallService, never())
+            .convertCustomerId(any(), any(), any());
+    }
+
+    // TEST 2 — Hazelcast MISS → fallback to external service
+    @Test
+    void getModernCustomerId_whenHazelcastMiss_callsExternalService() {
+        // ARRANGE - Hazelcast returns null
+        when(hazelcastWrapperProcessor.getRecord(any(), any(), any()))
+            .thenReturn(null);
+
+        // External service returns the UUID
+        when(externalCallService.convertCustomerId(
+            "12345", SyncType.LEGACY_TO_MODERN, "corr-001"))
+            .thenReturn(Mono.just("uuid-abc-123"));
+
+        // ACT + ASSERT
+        StepVerifier.create(
+            processor.getModernCustomerId("12345", "corr-001"))
+            .expectNext("uuid-abc-123")
+            .verifyComplete();
+
+        // External service MUST have been called
+        verify(externalCallService, times(1))
+            .convertCustomerId("12345", SyncType.LEGACY_TO_MODERN, "corr-001");
+    }
+
+    // TEST 3 — Both fail → error
+    @Test
+    void getModernCustomerId_whenBothFail_returnsError() {
+        when(hazelcastWrapperProcessor.getRecord(any(), any(), any()))
+            .thenReturn(null);
+        when(externalCallService.convertCustomerId(any(), any(), any()))
+            .thenReturn(Mono.error(
+                new AutoPaySynchException("Not found", "corr-001")));
+
+        StepVerifier.create(
+            processor.getModernCustomerId("12345", "corr-001"))
+            .expectError(AutoPaySynchException.class)
+            .verify();
+    }
+}
+
+
+
+@ExtendWith(MockitoExtension.class)
+class ExternalCallServiceTest {
+
+    @Mock
+    AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+    @Mock
+    ExternalCallService.ExternalServiceConfig config;
+
+    @InjectMocks
+    ExternalCallService externalCallService;
+
+    // TEST 1 — getModernCreditAccountId success
+    @Test
+    void getModernCreditAccountId_success_returnsAccountIdDto() {
+        // ARRANGE - build mock response
+        AccountsDetailsResponseContentInner content =
+            new AccountsDetailsResponseContentInner();
+        content.setAccountId("acc-uuid-123");
+
+        AccountsDetailsResponse response =
+            new AccountsDetailsResponse();
+        response.setContent(List.of(content));
+
+        WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
+        when(autoPaySyncClientHandler.get(any(), any(), any(), any()))
+            .thenReturn(responseSpec);
+        when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+            .thenReturn(Mono.just(response));
+
+        // ACT + ASSERT
+        StepVerifier.create(
+            externalCallService.getModernCreditAccountId(
+                "cust-uuid-456", "corr-001"))
+            .expectNextMatches(dto ->
+                "acc-uuid-123".equals(dto.getAccountId()))
+            .verifyComplete();
+    }
+
+    // TEST 2 — null response throws exception
+    @Test
+    void getModernCreditAccountId_nullResponse_throwsException() {
+        WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
+        when(autoPaySyncClientHandler.get(any(), any(), any(), any()))
+            .thenReturn(responseSpec);
+        when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+            .thenReturn(Mono.just(new AccountsDetailsResponse()));
+
+        StepVerifier.create(
+            externalCallService.getModernCreditAccountId(
+                "cust-uuid-456", "corr-001"))
+            .expectError(AutoPaySynchException.class)
+            .verify();
+    }
+}
+
+
