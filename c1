@@ -1,1 +1,288 @@
-hello
+package com.creditone.ucrm.autopaysynch.service;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.StringUtils;
+
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.dto.CreditAccountsResponse;
+import com.creditone.ucrm.autopaysynch.dto.CreditAccountsResponse.AccountDetail;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Service responsible for external HTTP API calls in the autopay synchronization system.
+ *
+ * Lead's requirement:
+ *   externalcallservice -> getModernCreditAccountId(legacyCreditAccountId)
+ *
+ * Calls: Credit Account Service
+ *   GET /private/creditcard/accounts?individualId={modernCustomerId}
+ *
+ * Follows the exact same pattern as ExternalCallService in debit-card-payment-sync-service.
+ */
+@Slf4j
+@Component
+@RefreshScope
+@RequiredArgsConstructor
+@EnableConfigurationProperties(ExternalCallService.ExternalServiceConfig.class)
+public class ExternalCallService {
+
+	private final ExternalServiceConfig externalServiceConfig;
+	private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+	// ─────────────────────────────────────────────────────────────
+	// Config Properties
+	// ─────────────────────────────────────────────────────────────
+
+	@Data
+	@ConfigurationProperties(prefix = "external-service")
+	public static class ExternalServiceConfig {
+
+		/** Credit Account Service config */
+		private CreditAccountConfig creditAccount;
+
+		@Data
+		public static class CreditAccountConfig {
+			private String host;
+			/** e.g. /private/creditcard/accounts */
+			private String accountsUri;
+			private String apikey;
+		}
+
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Get Modern Credit Account ID
+	// Calls: Credit Account Service
+	// GET /private/creditcard/accounts?individualId={modernCustomerId}
+	// ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Resolves the modern credit account UUID for a given modern customer ID
+	 * by calling the Credit Account Service.
+	 *
+	 * @param modernCustomerId modern customer UUID (resolved from Customer Domain Service)
+	 * @param correlationId    for distributed tracing
+	 * @return Mono of AccountIdDto with the resolved modern account ID
+	 */
+	public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to getModernCreditAccountId() for modernCustomerId: {}",
+				correlationId, modernCustomerId);
+
+		var headers = createHeaders(externalServiceConfig.getCreditAccount().getApikey(), correlationId);
+		var params = new LinkedMultiValueMap<String, String>();
+		params.add("individualId", modernCustomerId);
+
+		String url = externalServiceConfig.getCreditAccount().getHost()
+				+ externalServiceConfig.getCreditAccount().getAccountsUri();
+
+		return autoPaySyncClientHandler.get(url, headers, "credit-account-service", params)
+				.bodyToMono(CreditAccountsResponse.class)
+				.doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+						+ "Response from getModernCreditAccountId() for modernCustomerId: {}: {}",
+						correlationId, modernCustomerId, response))
+				.flatMap(response -> extractModernCreditAccountId(response, modernCustomerId, correlationId))
+				.onErrorResume(err -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "Error in getModernCreditAccountId() for modernCustomerId: {}, Error: {}",
+							correlationId, modernCustomerId, err.getMessage());
+					return Mono.error(err);
+				});
+	}
+
+	private Mono<AccountIdDto> extractModernCreditAccountId(CreditAccountsResponse response,
+			String modernCustomerId, String correlationId) {
+		if (response == null) {
+			return Mono.error(new AutoPaySynchException(
+					"Null response from Credit Account Service for modernCustomerId: " + modernCustomerId,
+					correlationId));
+		}
+
+		List<AccountDetail> content = response.getContent();
+		if (content == null || content.isEmpty()) {
+			return Mono.error(new AutoPaySynchException(
+					"No account data found for modernCustomerId: " + modernCustomerId, correlationId));
+		}
+
+		return content.stream()
+				.filter(Objects::nonNull)
+				.map(AccountDetail::getAccountId)
+				.filter(StringUtils::hasText)
+				.findFirst()
+				.map(AccountIdDto::new)
+				.map(Mono::just)
+				.orElseGet(() -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX
+							+ "No modern credit account ID found for modernCustomerId: {}",
+							correlationId, modernCustomerId);
+					return Mono.error(new AutoPaySynchException(
+							"No modern credit account ID found for modernCustomerId: " + modernCustomerId,
+							correlationId));
+				});
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Helpers
+	// ─────────────────────────────────────────────────────────────
+
+	private Map<String, String> createHeaders(String apiKey, String correlationId) {
+		return Map.of("apiKey", apiKey, AutoPaySynchConstant.CORRELATION_ID, correlationId);
+	}
+
+}
+
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * DTO carrying the result of a credit account ID conversion.
+ * May contain both legacy card ID and modern account ID depending on sync direction.
+ * Follows same pattern as debit-card-payment-sync-service AccountIdDto.
+ */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class AccountIdDto {
+
+	/** Modern account UUID (used in LEGACY_TO_MODERN) */
+	private String modernAccountId;
+
+	/** Legacy card/device ID (used in MODERN_TO_LEGACY) */
+	private String legacyCardId;
+
+	/**
+	 * Constructor for LEGACY_TO_MODERN — only modern account ID needed.
+	 *
+	 * @param modernAccountId the resolved modern account UUID
+	 */
+	public AccountIdDto(String modernAccountId) {
+		this.modernAccountId = modernAccountId;
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import lombok.Data;
+
+/**
+ * Response DTO from Credit Account Service GET /private/creditcard/accounts
+ * Maps to AccountsDetailsResponse schema
+ */
+@Data
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class CreditAccountsResponse {
+
+	@JsonProperty("content")
+	private List<AccountDetail> content;
+
+	@JsonProperty("page")
+	private PageInfo page;
+
+	@Data
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public static class AccountDetail {
+
+		/** Modern credit account UUID */
+		@JsonProperty("accountId")
+		private String accountId;
+
+		/** Modern individual/customer UUID */
+		@JsonProperty("individualId")
+		private String individualId;
+
+		@JsonProperty("involvementId")
+		private String involvementId;
+
+		@JsonProperty("accountInvolvementType")
+		private String accountInvolvementType;
+
+		@JsonProperty("accountState")
+		private String accountState;
+
+		@JsonProperty("accountStatus")
+		private String accountStatus;
+
+		@JsonProperty("isAutoPayEligible")
+		private Boolean isAutoPayEligible;
+
+		@JsonProperty("device")
+		private DeviceDetail device;
+	}
+
+	@Data
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public static class DeviceDetail {
+
+		@JsonProperty("deviceId")
+		private String deviceId;
+
+		/** Last 4 digits of the credit card */
+		@JsonProperty("deviceLast4")
+		private String deviceLast4;
+
+		@JsonProperty("deviceType")
+		private String deviceType;
+
+		@JsonProperty("deviceStatus")
+		private String deviceStatus;
+	}
+
+	@Data
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public static class PageInfo {
+
+		@JsonProperty("totalPages")
+		private Integer totalPages;
+
+		@JsonProperty("totalElements")
+		private Integer totalElements;
+
+		@JsonProperty("size")
+		private Integer size;
+
+		@JsonProperty("number")
+		private Integer number;
+	}
+
+}
