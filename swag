@@ -1,642 +1,408 @@
-co-op-user-admin-service
- v0.17.2 
-OAS 3.0
-Co Op User Admin Service
-
-Servers
-
-https://devapi.vda.dv01.c1busw2.aws/private/enterprise/co-op/user-admin - DEV
-Authorize
-Users
-
-
-GET
-/users
-Get Users
-
-Parameters
-Try it out
-Name	Description
-page
-integer($int32)
-(query)
-Default value : 0
-
-0
-size
-integer($int32)
-(query)
-Default value : 20
-
-20
-firstName
-string
-(query)
-firstName
-lastName
-string
-(query)
-lastName
-organizationId
-string($uuid)
-(query)
-organizationId
-externalId
-string
-(query)
-externalId
-status
-string
-(query)
-Available values : ACT, INA
-
-
---
-emailAddress
-string
-(query)
-emailAddress
-userUniqueIdentifier
-string($uuid)
-(query)
-userUniqueIdentifier
-casId
-string
-(query)
-casId
-fdrId
-string
-(query)
-fdrId
-requestedBy *
-string
-(header)
-requestedBy
-Responses
-Code	Description	Links
-200	
-OK
-
-Media type
-
-application/json
-Controls Accept header.
-Example Value
-Schema
-{
-  "totalElements": 0,
-  "totalPages": 0,
-  "size": 0,
-  "content": [
-    {
-      "uniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
-      "title": "MR",
-      "firstName": "John",
-      "middleName": "J",
-      "lastName": "Doe",
-      "displayFirstName": "John",
-      "displayLastName": "Doe",
-      "dateOfBirth": "2000-01-18",
-      "trainingStartDate": "2000-01-18",
-      "trainingEndDate": "2000-01-18",
-      "departmentCode": "string",
-      "designation": "string",
-      "department": "string",
-      "genderCode": "M",
-      "organizations": [
-        {
-          "organizationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "externalId": "c1b-001"
-        }
-      ],
-      "emailAddress": "example@creditone.com",
-      "status": "ACT",
-      "terminationReason": "VOLUNTARY",
-      "terminationSubReason": "RELOCATION",
-      "createdBy": "MYN",
-      "createdDate": "string",
-      "updatedBy": "MYN",
-      "updatedDate": "string",
-      "metaData": {
-        "bmaManagerId": "string",
-        "bmaRoleId": "string",
-        "batchNumber": "string",
-        "trainerId": "string",
-        "casId": "string",
-        "fdrId": "string",
-        "newAlertEmail": [
-          "jane.doe@creditone.com",
-          "jane.doe@creditone.com"
-        ],
-        "escalatedAlertMail": [
-          "jane.doe@creditone.com",
-          "jane.doe@creditone.com"
-        ],
-        "escalated2AlertMail": [
-          "jane.doe@creditone.com",
-          "jane.doe@creditone.com"
-        ]
-      },
-      "supervisorId": "string",
-      "hireDate": "2000-01-18",
-      "effectiveDate": "2000-01-18",
-      "productionDate": "2000-01-18",
-      "versantScore": [
-        {
-          "language": "string",
-          "score": 0,
-          "versantScoreDate": "2000-01-18"
-        }
-      ],
-      "addresses": [
-        {
-          "userAddressId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "userUniqueIdentifier": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "organizationServiceLocationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "workHours": "string",
-          "location": "string",
-          "createdBy": "string",
-          "createdTimestamp": "string"
-        }
-      ],
-      "phoneExtension": "1234",
-      "projectSkill": "Test",
-      "userAttested": true,
-      "userAttestedBy": "string"
-    }
-  ],
-  "number": 0,
-  "sort": {
-    "empty": true,
-    "unsorted": true,
-    "sorted": true
-  },
-  "numberOfElements": 0,
-  "first": true,
-  "last": true,
-  "pageable": {
-    "offset": 0,
-    "sort": {
-      "empty": true,
-      "unsorted": true,
-      "sorted": true
-    },
-    "unpaged": true,
-    "paged": true,
-    "pageNumber": 0,
-    "pageSize": 0
-  },
-  "empty": true
-}
-No links
-
-GET
-/users/{id}
-Get User Details
-
-Parameters
-Try it out
-Name	Description
-id *
-string($uuid)
-(path)
-Individual Unique Identifier of the User
-
-id
-requestedBy *
-string
-(header)
-requestedBy
-Responses
-Code	Description	Links
-200	
-OK
-
-Media type
-
-application/json
-Controls Accept header.
-Example Value
-Schema
-{
-  "uniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
-  "title": "MR",
-  "firstName": "John",
-  "middleName": "J",
-  "lastName": "Doe",
-  "displayFirstName": "John",
-  "displayLastName": "Doe",
-  "dateOfBirth": "2000-01-18",
-  "trainingStartDate": "2000-01-18",
-  "trainingEndDate": "2000-01-18",
-  "departmentCode": "string",
-  "designation": "string",
-  "department": "string",
-  "genderCode": "M",
-  "organizations": [
-    {
-      "organizationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "externalId": "c1b-001"
-    }
-  ],
-  "emailAddress": "example@creditone.com",
-  "status": "ACT",
-  "terminationReason": "VOLUNTARY",
-  "terminationSubReason": "RELOCATION",
-  "createdBy": "MYN",
-  "createdDate": "string",
-  "updatedBy": "MYN",
-  "updatedDate": "string",
-  "metaData": {
-    "bmaManagerId": "string",
-    "bmaRoleId": "string",
-    "batchNumber": "string",
-    "trainerId": "string",
-    "casId": "string",
-    "fdrId": "string",
-    "newAlertEmail": [
-      "jane.doe@creditone.com",
-      "jane.doe@creditone.com"
-    ],
-    "escalatedAlertMail": [
-      "jane.doe@creditone.com",
-      "jane.doe@creditone.com"
-    ],
-    "escalated2AlertMail": [
-      "jane.doe@creditone.com",
-      "jane.doe@creditone.com"
-    ]
-  },
-  "supervisorId": "string",
-  "hireDate": "2000-01-18",
-  "effectiveDate": "2000-01-18",
-  "productionDate": "2000-01-18",
-  "versantScore": [
-    {
-      "language": "string",
-      "score": 0,
-      "versantScoreDate": "2000-01-18"
-    }
-  ],
-  "addresses": [
-    {
-      "userAddressId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "userUniqueIdentifier": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "organizationServiceLocationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "workHours": "string",
-      "location": "string",
-      "createdBy": "string",
-      "createdTimestamp": "string"
-    }
-  ],
-  "phoneExtension": "1234",
-  "projectSkill": "Test",
-  "userAttested": true,
-  "userAttestedBy": "string"
-}
-No links
-
-Schemas
-BadRequestError{
-status_code*	[...]
-error*	[...]
-path*	[...]
-}
-UserAddressResponse
-UserOrganizationResponse
-UserResponse
-PageUserResponse
-PageableObject
-SortObject
-UserVersantScoreRequest
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Customer Domain Service
- v1.34.0 
-OAS 3.0
-Customer Identity and Access Management API Microservice
-
-Servers
-
-https://devapi.vda.dv01.c1busw2.aws/private/enterprise/customer
-07. Product Entitlement
-
-
-GET
-/systemlinkages
-Find SystemLinkagesResponse based on search parameters
-Parameters
-Try it out
-Name	Description
-systemCustomerId
-string
-(query)
-systemCustomerId
-Responses
-Code	Description	Links
-200	
-OK
-
-Media type
-
-application/hal+json
-Controls Accept header.
-Example Value
-Schema
-{
-  "content": [
-    {
-      "createdBy": "string",
-      "createdTimestamp": "1937-12-16T01:28:34.913+17:03",
-      "individualUniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
-      "recordStatus": "ACT",
-      "source": "CAS",
-      "systemCustomerId": "string",
-      "systemLinkageId": "53681329-8428-4bc5-a5b2-b7058431d5c4",
-      "systemStatus": "ACT",
-      "systemType": "ACT",
-      "updatedTimestamp": "2050-01-30T16:40:06.426+95:38",
-      "updatedBy": "ACT",
-      "versionNumber": 0
-    }
-  ],
-  "pageable": {
-    "offset": 0,
-    "sort": {
-      "empty": true,
-      "sorted": true,
-      "unsorted": true
-    },
-    "pageNumber": 0,
-    "pageSize": 0,
-    "unpaged": true,
-    "paged": true
-  },
-  "last": true,
-  "totalPages": 0,
-  "totalElements": 0,
-  "size": 0,
-  "number": 0,
-  "sort": {
-    "empty": true,
-    "sorted": true,
-    "unsorted": true
-  },
-  "first": true,
-  "numberOfElements": 0,
-  "empty": true
-}
-No links
-400	
-Bad Request
-
-Media type
-
-application/hal+json
-Example Value
-Schema
-{
-  "errorCode": "string",
-  "errorMessage": "string",
-  "errorDescription": "string"
-}
-No links
-
-Schemas
-ErrorDetails
-SystemLinkagesResponse
-SystemLinkage
-PageableObject
-SortObject
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Credit Account Service
- v1.1 
-OAS 3.0
-Credit Account Service
-
-Servers
-
-https://devapi.vda.dv01.c1busw2.aws - Generated server url
-Credit Account Service
-
-
-GET
-/private/creditcard/accounts
-Get Accounts
-getAccounts
-
-Parameters
-Try it out
-Name	Description
-correlationId
-string
-(header)
-correlationId
-individualId *
-string($uuid)
-(query)
-Individual ID
-
-ae787cc8-beaf-46da-a88a-6ef38ab5239e
-Responses
-Code	Description	Links
-200	
-OK
-
-Media type
-
-*/*
-Controls Accept header.
-Example Value
-Schema
-{
-  "page": {
-    "totalPages": 0,
-    "totalElements": 0,
-    "size": 0,
-    "number": 0
-  },
-  "content": [
-    {
-      "individualId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-      "involvementId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-      "accountInvolvementType": "PRIMARY",
-      "accountId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-      "accountOpenDate": "2017-07-21",
-      "accountState": "string",
-      "accountStatus": "string",
-      "externalStatus": "string",
-      "externalReasonCode": "string",
-      "status": "AUTHORIZATION_PROHIBITED",
-      "subStatus": "string",
-      "accountCloseDate": "2017-07-21",
-      "isOverlimit": true,
-      "isDelinquent": true,
-      "isPaymentEligible": true,
-      "isExpressPayEligible": true,
-      "isAutoPayEligible": true,
-      "isDigitalViewAllowed": true,
-      "creditLimit": 100500.09,
-      "availableCredit": 100500.09,
-      "productKey": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "savingsAccountNumber": "string",
-      "device": {
-        "deviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-        "issuedDeviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-        "accountId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-        "prinNumber": "1020",
-        "agentNumber": "1104",
-        "systemNumber": "41030",
-        "previousDeviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
-        "deviceType": "CREDIT_CARD",
-        "firstIssuedDate": "2017-07-21",
-        "currentDeviceIssuedDate": "2017-07-21",
-        "deviceStatus": "NORMAL",
-        "activationStatus": true,
-        "network": "VISA",
-        "isCurrentDevice": true,
-        "deviceLast4": "9837",
-        "currentAnnualMerchandiseRate": 0,
-        "annualChargeAmount": 0,
-        "issuedDate": "2017-07-21",
-        "expirationDate": "2017-07-01",
-        "plasticDesignCode": "CJ",
-        "activationCode": "string",
-        "createdBy": "Internal System - Accounts Domain",
-        "createdTimestamp": "2017-07-21T17:32:28.123Z",
-        "updatedBy": "Internal System - Accounts Domain",
-        "updatedTimestamp": "2017-07-21T17:32:28.123Z"
-      },
-      "createdBy": "string",
-      "createdTimestamp": 0,
-      "updatedBy": "string",
-      "deviceStatus": "string",
-      "updatedTimestamp": 0,
-      "isNegativeAmortization": true
-    }
-  ]
-}
-No links
-400	
-Bad Request
-
-Media type
-
-*/*
-Example Value
-Schema
-{
-  "errorMsg": [
-    "Error Processing your request"
-  ],
-  "statusCode": 404,
-  "timestamp": "2017-07-21T17:32:28Z"
-}
-No links
-404	
-Not Found
-
-Media type
-
-*/*
-Example Value
-Schema
-{
-  "errorMsg": [
-    "Error Processing your request"
-  ],
-  "statusCode": 404,
-  "timestamp": "2017-07-21T17:32:28Z"
-}
-No links
-500	
-Internal Server Error
-
-Media type
-
-*/*
-Example Value
-Schema
-{
-  "errorMsg": [
-    "Error Processing your request"
-  ],
-  "statusCode": 404,
-  "timestamp": "2017-07-21T17:32:28Z"
-}
-No links
-SystemLinkage
-
-
-GET
-/private/creditcard/accounts/systemlinkage
-NOTE THIS ENDPOINT IS A DRAFT FOR - Get Device replacement Eligibility
-Get SystemLinkage
-
-Parameters
-Try it out
-Name	Description
-()
-Responses
-Code	Description	Links
-200	
-No links
-400	
-No links
-401	
-No links
-404	
-No links
-429	
-No links
-500	
-No links
-
-Schemas
-ErrorResponse
-DateTime
-IndividualId
-AccountsDetailsResponse
-Page
-InvolvementId
-AccountInvolvementType
-AccountId
-AccountOpenDate
-AccountCloseDate
-CreditLimit
-AvailableCredit
-ProductKey
-CurrentIssuedDevice
-DeviceId
-PrinNumber
-AgentNumber
-SystemNumber
-PreviousDevi
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.creditone.ucrm.autopaysynch</groupId>
+	<artifactId>auto-pay-config-sync-service</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name></name>
+	<description></description>
+
+	<parent>
+        <!--Automation script will patch the version in case of vulnerability discovery-->
+        <groupId>com.creditone.microservice</groupId>
+        <artifactId>reactive-microservice-starter-parent</artifactId>
+        <version>3.0.0</version>
+        <relativePath/>
+    </parent>
+
+	<properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>21</java.version>
+    </properties>
+
+	<dependencies>
+		<dependency>
+            <groupId>com.creditone.microservice</groupId>
+            <artifactId>reactive-microservice-common-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-security</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.cloud</groupId>
+                    <artifactId>spring-cloud-starter-vault-config</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-logging</artifactId>
+            <version>3.5.7</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-to-slf4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <version>3.0.0</version>
+			<scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <version>3.7.13</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+            <version>1.9.25</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.8</version>
+        </dependency>
+        <dependency>
+            <groupId>io.hypersistence</groupId>
+            <artifactId>hypersistence-utils-hibernate-63</artifactId>
+            <version>3.12.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kie</groupId>
+            <artifactId>kie-ci</artifactId>
+            <version>10.1.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast</artifactId>
+            <version>5.5.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast-enterprise</artifactId>
+            <version>5.5.0</version>
+        </dependency>
+	</dependencies>
+
+	<build>
+		<resources>
+            <resource>
+                <filtering>true</filtering>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>**/*.properties</include>
+                    <include>**/*.json</include>
+                </includes>
+            </resource>
+        </resources>
+		<plugins>
+			<plugin>
+				<groupId>org.openapitools</groupId>
+				<artifactId>openapi-generator-maven-plugin</artifactId>
+				<version>6.6.0</version>
+				<executions>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>ciam</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/ciam/ciam.yml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.ciam.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>credit-account-service</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/credit-account-service/credit-account-service.yml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.creditaccountservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>creditcard-extaccounts-agentid-fallback-service-api</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/agentidfallbackservice/agentid-fallback-service.yaml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.agentidfallbackservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>auto-pay-config-sync-service</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/autopayconfigsyncservice/auto-pay-config-sync-service.yaml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.autopayconfigsyncservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!--  Plugin configurations are inherited from parent-->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <addResources>true</addResources>
+                </configuration>
+            </plugin>
+            <plugin>
+                <!-- Building an executable jar -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.creditone.ucrm.autopaysynch.Application</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- Plugins for Junit mvn test and Jacoco starts -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*com/creditone/ucrm/autopaysynch/Application.class</exclude>
+                        <exclude>**/*com/creditone/swagger/**</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- Plugins for Junit mvn test and Jacoco ends -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <java>
+                        <includes>
+                            <include>src/main/java/**/*.java</include>
+                            <include>src/test/java/**/*.java</include>
+                        </includes>
+                        <excludes>
+                            <exclude>target/generated-sources/**/*.java</exclude>
+                            <exclude>src/main/java/**/generated/**/*.java</exclude>
+                        </excludes>
+                        <importOrder>
+                            <order>
+                                java|javax,jakarta,org.springframework,org,com,com.creditone,,\#</order>
+                        </importOrder>
+                        <eclipse>
+					        <file>${project.basedir}/code-formatter.xml</file>
+					    </eclipse>
+                        <removeUnusedImports />
+                        <replace>
+                            <name>Remove extra blank lines</name>
+                            <search>\n\n\n+</search>
+                            <replacement>\n\n</replacement>
+                        </replace>
+                        <trimTrailingWhitespace />
+                        <endWithNewline />
+                    </java>
+                    <formats>
+                        <format>
+						    <includes>
+						        <include>src/main/resources/**/*.yml</include>
+						        <include>src/main/resources/**/*.yaml</include>
+						        <include>src/test/resources/**/*.yml</include>
+						        <include>src/test/resources/**/*.yaml</include>
+						    </includes>
+						    <trimTrailingWhitespace />
+						    <endWithNewline />
+						    <indent>
+						        <spaces>true</spaces>
+						        <spacesPerTab>2</spacesPerTab>
+						    </indent>
+						</format>
+                        <format>
+                            <includes>
+                                <include>src/main/resources/**/*.properties</include>
+                                <include>src/test/resources/**/*.properties</include>
+                            </includes>
+                            <trimTrailingWhitespace />
+                            <endWithNewline />
+                        </format>
+                    </formats>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotless-apply</id>
+                        <goals>
+                            <goal>apply</goal>
+                        </goals>
+                        <phase>process-sources</phase>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+			    <groupId>org.apache.maven.plugins</groupId>
+			    <artifactId>maven-compiler-plugin</artifactId>
+			    <configuration>
+			        <annotationProcessorPaths>
+			            <path>
+			                <groupId>org.projectlombok</groupId>
+			                <artifactId>lombok</artifactId>
+			                <version>1.18.42</version>
+			            </path>
+			        </annotationProcessorPaths>
+			    </configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+	<repositories>
+        <repository>
+            <!--All packages needed can be found at Development Group-->
+            <id>gitlab-maven</id>
+            <url>https://gitlab.com/api/v4/groups/13452711/-/packages/maven</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>sona-hazelcast</id>
+            <url>https://sona-artifacts.c1b.corp/repository/maven-hazelcast/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+</project>
