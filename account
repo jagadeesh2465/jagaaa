@@ -1,0 +1,88 @@
+package com.creditone.ucrm.extaccountssynch.controller;
+
+import com.creditone.swagger.extaccountsyncservice.dtoswagger.ExtAccountSyncRequest;
+import com.creditone.swagger.extaccountsyncservice.dtoswagger.ExtAccountSyncRequestId;
+import com.creditone.swagger.extaccountsyncservice.dtoswagger.ExtAccountSyncResponse;
+import com.creditone.ucrm.extaccountssynch.constant.ExternalAccountSynchConstants;
+import com.creditone.ucrm.extaccountssynch.processor.ExtAccountsSyncRetryProcessor;
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.servers.Server;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
+
+@OpenAPIDefinition(info = @Info(title = "External Bank Accounts Sync Service", description = "External Bank Accounts Sync Microservice", version = "v1.2"), tags = {@Tag(name = "External Accounts Sync")}, servers = {@Server(url = "/", description = "Default url")})
+@Validated
+@RestController
+@Slf4j
+@RequestMapping("/private/creditcard/financials/external-account-sync-service")
+public class ExternalAccountSyncController {
+
+    private ExtAccountsSyncRetryProcessor externalAccountProcessor;
+
+    public ExternalAccountSyncController(ExtAccountsSyncRetryProcessor externalAccountProcessor) {
+        this.externalAccountProcessor = externalAccountProcessor;
+    }
+
+    @PostMapping(path = "/accounts/reprocess")
+    @Operation(summary = " Reprocess messages", tags = {"External Accounts Sync"}, description = " Reprocess messages",
+            responses = {@ApiResponse(responseCode = "201", description = "Successfully Reprocessed", content = @Content(mediaType = "application/json", schema = @Schema(name = "Successful response")))})
+    @ResponseStatus(HttpStatus.OK)
+    public Mono<ExtAccountSyncResponse> reprocessExternalBankAccountSync(
+            @RequestHeader(name = ExternalAccountSynchConstants.API_VERSION, required = false) String apiVersion,
+            @RequestHeader(name = ExternalAccountSynchConstants.CORRELATION_ID, required = false) String correlationId,
+            @Valid @RequestBody ExtAccountSyncRequest extaccountSyncRequest) {
+        return Mono.deferContextual(context -> {
+            log.info(ExternalAccountSynchConstants.LOG_PREFIX + "Start of reprocessPaymentSynch(). api-version: {}, reprocessRequest: {}", context.get(ExternalAccountSynchConstants.CORRELATION_ID), apiVersion, extaccountSyncRequest);
+            externalAccountProcessor.reprocessExternalBankAccountSync(extaccountSyncRequest, context.get(ExternalAccountSynchConstants.CORRELATION_ID))
+                    .flatMap(reprocessingExecuted -> {
+                        log.info(ExternalAccountSynchConstants.LOG_PREFIX + "reprocessPaymentSynch() executed.", context.get(ExternalAccountSynchConstants.CORRELATION_ID).toString());
+                        return Mono.just(reprocessingExecuted);
+                    })
+                    .onErrorResume(err -> {
+                        log.error(ExternalAccountSynchConstants.LOG_PREFIX + "Reprocess Failed. Reason: {}, errorDetail: {}", context.get(ExternalAccountSynchConstants.CORRELATION_ID), err,
+                                ExceptionUtils.getStackTrace(err).replaceAll("[\\r\\n\\t]+", " "));
+                        return Mono.error(err);
+                    }).subscribe();
+
+            ExtAccountSyncResponse reprocessedResponse = new ExtAccountSyncResponse();
+            reprocessedResponse.setStatus(ExternalAccountSynchConstants.SUCCESS);
+            log.info(ExternalAccountSynchConstants.LOG_PREFIX + "Response of reprocessExternalBankAccountSync()", context.get(ExternalAccountSynchConstants.CORRELATION_ID).toString());
+            return Mono.just(reprocessedResponse);
+        });
+    }
+
+    @Operation(tags = "External Bank Account Synch Service", description = "Reprocess External Bank Account Synch By Id", summary = "Reprocess External Bank Account Synch By Id")
+    @PostMapping(path = "/accounts/reprocessById")
+    @ResponseStatus(HttpStatus.OK)
+    public Mono<ExtAccountSyncResponse> reprocessExternalBankAccountSyncById(
+            @RequestHeader(name = ExternalAccountSynchConstants.API_VERSION, required = false) String apiVersion,
+            @RequestHeader(name = ExternalAccountSynchConstants.CORRELATION_ID, required = false) String correlationId,
+            @Valid @RequestBody ExtAccountSyncRequestId extAccountSyncRequestId) {
+        return Mono.deferContextual(context -> {
+            log.info(ExternalAccountSynchConstants.LOG_PREFIX + "Start of reprocessExternalBankAccountSyncById(). api-version: {}, extAccountSyncRequestId: {}", context.get(ExternalAccountSynchConstants.CORRELATION_ID), apiVersion,
+                    extAccountSyncRequestId);
+            externalAccountProcessor.reprocessExternalBankAccountSyncById(extAccountSyncRequestId, context.get(ExternalAccountSynchConstants.CORRELATION_ID)).onErrorResume(err -> {
+                log.error(ExternalAccountSynchConstants.LOG_PREFIX + "reprocessExternalBankAccountSyncById Failed. errorDetail: {}", context.get(ExternalAccountSynchConstants.CORRELATION_ID),
+                        ExceptionUtils.getStackTrace(err).replaceAll("[\\r\\n\\t]+", " "));
+                return Mono.error(err);
+            }).subscribe();
+
+            ExtAccountSyncResponse extAccountSyncResponse = new ExtAccountSyncResponse();
+            extAccountSyncResponse.setStatus(ExternalAccountSynchConstants.SUCCESS);
+            return Mono.just(extAccountSyncResponse).doOnSuccess(legacyPaymentResponse -> {
+                log.info(ExternalAccountSynchConstants.LOG_PREFIX + "End of reprocessExternalBankAccountSyncById()", context.get(ExternalAccountSynchConstants.CORRELATION_ID).toString());
+            });
+        });
+    }
+}
