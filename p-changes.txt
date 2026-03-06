@@ -1,0 +1,2249 @@
+Homepage
+Primary navigation
+Project
+A
+auto-pay-config-sync-service
+
+Pinned
+
+Manage
+
+Plan
+
+Automate
+
+Code
+Merge requests
+2
+Repository
+Branches
+Commits
+Tags
+Repository graph
+Compare revisions
+Snippets
+Locked files
+
+Build
+
+Secure
+
+Deploy
+
+Operate
+
+Monitor
+
+Analyze
+
+Settings
+Credit Card
+Payment Management
+auto-pay-config-sync-service
+Compare revisions
+SSPP-Id-map to DAT-1369-entity-and-DTO-setup
+Compare revisions
+Changes are shown as if the source revision was being merged into the target revision. Learn more about comparing revisions.
+Source
+Target
+Show changes
+Only incoming changes from source
+Include changes to target after source was created
+Commits on Source
+7
+Pavit Hora's avatar
+DAT-1369 Added entity, DTO and mapppers
+Pavit Hora authored 1 day ago
+8c688c75
+Pavit Hora's avatar
+DAT-1369 Updated entity, DTO, Mappers and Added Test cases
+Pavit Hora authored 1 day ago
+09b3695c
+Pavit Hora's avatar
+DAT-1369 Updated Linkage Mapper
+Pavit Hora authored 22 hours ago
+2da5a1a7
+Pavit Hora's avatar
+DAT-1369 Code Cleanup
+Pavit Hora authored 22 hours ago
+16327f2e
+rusharma's avatar
+Committed the structure for legacy to modern processor
+rusharma authored 17 hours ago and Pavit Hora's avatar Pavit Hora committed 4 hours ago
+ea6e7e4f
+Pavit Hora's avatar
+SSPP-13034 Updated CommonSyncProcessor and AutoPaySynchLogDAO for handleError and saveEvent
+Pavit Hora authored 4 hours ago
+18db3d26
+Pavit Hora's avatar
+SSPP-13035 Updated DTOs, Mappers for AutoPay and AutoPayHistory
+Pavit Hora authored 3 hours ago
+a8c0923d
+ 31 files
++
+1688
+−
+10
+Files
+31
+Search (e.g. *.vue) (F)
+auto-pay-config-syn
+‎c-service-dv01.yaml‎
++14 -0
+
+s
+‎rc‎
+
+ma
+‎in‎
+
+java/com/creditone
+‎/ucrm/autopaysynch‎
+
+con
+‎fig‎
+AutoPayDBC
+‎onfig.java‎
++124 -0
+SyncCont
+‎ext.java‎
++31 -0
+
+d
+‎ao‎
+AutoPay
+‎DAO.java‎
++14 -0
+AutoPayHist
+‎oryDAO.java‎
++14 -0
+AutoPayHisto
+‎ryMapper.java‎
++88 -0
+AutoPayMa
+‎pper.java‎
++83 -0
+AutoPaySynchLin
+‎kageMapper.java‎
++100 -1
+AutoPaySync
+‎hLogDAO.java‎
++26 -0
+AutoPaySynchL
+‎ogMapper.java‎
++42 -2
+
+d
+‎to‎
+Activity
+‎DTO.java‎
++26 -0
+AutoPayD
+‎ata.java‎
++24 -0
+AutoPayHist
+‎oryDTO.java‎
++29 -0
+AutoPayHistor
+‎yResponse.java‎
++21 -0
+AutoPayRes
+‎ponse.java‎
++20 -0
+AutoPaySynchLink
+‎ageResponse.java‎
++29 -0
+AutoPaySynchLo
+‎gResponse.java‎
++20 -0
+ConfigD
+‎ata.java‎
++33 -0
+
+mo
+‎del‎
+AutoPayEn
+‎tity.java‎
++69 -0
+AutoPayHisto
+‎ryEntity.java‎
++69 -0
+AutoPaySynchLin
+‎kageEntity.java‎
++55 -1
+AutoPaySynchL
+‎ogEntity.java‎
++28 -1
+
+proc
+‎essor‎
+AutoPayDBPr
+‎ocessor.java‎
++19 -0
+CommonSyncPr
+‎ocessor.java‎
++33 -3
+LegacyToModern
+‎Processor.java‎
++110 -2
+
+repositor
+‎y/autopay‎
+AutoPayHistory
+‎Repository.java‎
++13 -0
+AutoPayRepo
+‎sitory.java‎
++12 -0
+
+reso
+‎urces‎
+application
+‎.properties‎
++15 -0
+
+test/java/com/credit
+‎one/ucrm/autopaysynch‎
+
+con
+‎fig‎
+AutoPayDBCon
+‎figTest.java‎
++276 -0
+
+d
+‎ao‎
+AutoPaySynchLinka
+‎geMapperTest.java‎
++170 -0
+AutoPaySynchLog
+‎MapperTest.java‎
++81 -0
+
+auto-pay-config-sync-service-dv01.yaml
++14
+−0
+Original line number	Diff line number	Diff line
+#----Config----
+APP_NAME: auto-pay-config-sync-service
+ENV: DEV
+HEALTH_URI: /actuator/health
+
+HTTP_ENABLE_METRICS: true
+HTTP_MAX_CONNECTIONS: 60
+HTTP_MAX_CONNECTION_POOL: 200
+HTTP_MAX_CONN_TIMEOUT_MILLIS: 15000
+HTTP_MAX_EVICTINBACKGROUND_S: 120
+HTTP_MAX_IDLE_TIME_S: 60
+HTTP_MAX_INMEMORY_SIZE: 8388608
+HTTP_MAX_LIFE_TIME_S: 60
+HTTP_MAX_READ_TIMEOUT_MILLIS: 15000
+HTTP_MAX_RESPONSE_TIMEOUT_MILLIS: 15000
+HTTP_MAX_WRITE_TIMEOUT_MILLIS: 15000
+HTTP_RETRY_COUNT: 3
+HTTP_RETRY_DURATION_SECONDS: 5
+
+AUTO_PAY_SYNC_SERVICE_DB_JDBC_HOST: crd-app-dev-pgsql-inst01.crdapp.dv.c1b.aws
+AUTO_PAY_SYNC_SERVICE_DB_PORT: 5555
+AUTO_PAY_SYNC_SERVICE_DB_NAME: credit_card_account
+AUTO_PAY_SYNC_SERVICE_DB_POOL_MAX_IDLE_TIME: 5
+AUTO_PAY_SYNC_SERVICE_DB_MAX_POOL_SIZE: 10
+AUTO_PAY_SYNC_SERVICE_DB_INITIAL_POOL_SIZE: 3
+AUTO_PAY_SYNC_SERVICE_DATABASE_REPOSITORY_BASE_PACKAGE: com.creditone.ucrm.autopaysynch.repository.autopaysync
+AUTO_PAY_SYNC_SERVICE_MAX_ACQUIRE_TIME: 30
+AUTO_PAY_SYNC_SERVICE_MAX_CREATE_CONNECTION_TIME: 10
+AUTO_PAY_SYNC_SERVICE_MAX_LIFETIME: 120
+AUTO_PAY_SYNC_SERVICE_MAX_LIFETIME: 120
+AUTO_PAY_SYNC_SERVICE_ACQUIRE_RETRY: 3
+
+AUTO_PAY_SERVICE_DB_JDBC_HOST: crd-app-dev-pgsql-inst01.crdapp.dv.c1b.aws
+AUTO_PAY_SERVICE_DB_PORT: 5555
+AUTO_PAY_SERVICE_DB_NAME: credit_card_account
+AUTO_PAY_SERVICE_DB_POOL_MAX_IDLE_TIME: 5
+AUTO_PAY_SERVICE_DB_MAX_POOL_SIZE: 10
+AUTO_PAY_SERVICE_DB_INITIAL_POOL_SIZE: 3
+AUTO_PAY_SERVICE_DATABASE_REPOSITORY_BASE_PACKAGE: com.creditone.ucrm.autopaysynch.repository.autopay
+AUTO_PAY_SERVICE_MAX_ACQUIRE_TIME: 30
+AUTO_PAY_SERVICE_MAX_CREATE_CONNECTION_TIME: 10
+AUTO_PAY_SERVICE_MAX_LIFETIME: 120
+AUTO_PAY_SERVICE_ACQUIRE_RETRY: 3
+
+KAFKA_LEGACY_CONSUMER_BOOTSTRAP_ADDRESS: kafka.confluent.apps.dv01.lv1.ocp.c1b:443
+KAFKA_LEGACY_CONSUMER_TOPIC: CC_LEGACYSVC_AUTOPAYSYNC_CONFIG_DATA
+KAFKA_LEGACY_CONSUMER_GROUP_ID: AUTO_PAY_SYNC_GROUP
+KAFKA_CONSUMER_LEGACY_TO_MODERN_CONCURRENCY: 10
+KAFKA_CONSUMER_LEGACY_TO_MODERN_RATE_LIMIT: 10
+KAFKA_CONSUMER_LEGACY_TO_MODERN_RATE_REPLENISH: 1
+KAFKA_CONSUMER_AUTO_OFFSET_RESET: earliest
+KAFKA_CONSUMER_SECURITY_PROTOCOL: SASL_SSL
+KAFKA_SESSION_TIMEOUT_MS: 30000
+KAFKA_HEARTBEAT_INTERVAL_MS: 10000
+KAFKA_COMMIT_INTERVAL_MS: 10
+KAFKA_COMMIT_BATCH_SIZE: 5
+KAFKA_CONSUMER_RETRY_ATTEMPTS: 10
+KAFKA_CONSUMER_RETRY_BACKOFF_MS: 1000
+KAFKA_CONSUMER_RETRY_MULTIPLIER: 0.5
+KAFKA_CONSUMER_RETRY_MAX_DELAY_MS: 10000
+KAFKA_CONSUMER_MAX_POLL_RECORDS: 10
+KAFKA_CONSUMER_FETCH_MIN_BYTES: 1
+KAFKA_CONSUMER_FETCH_MAX_WAIT_MS: 500
+KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS: 300000
+KAFKA_CONSUMER_PROCESSING_TIMEOUT_SECONDS: 30
+KAFKA_ONPREM_SSL_TRUSTSTORE_LOCATION: C:\sandbox\OnPremKafkaCerts\certs\c1b_truststore.jks
+KAFKA_ONPREM_SASL_MECHANISM: PLAIN
+KAFKA_ONPREM_SASL_JAAS_LOGIN_MODULE: org.apache.kafka.common.security.plain.PlainLoginModule
+KAFKA_CONSUMER_MONITOR_FIXED_DELAY: 3600000
+KAFKA_CONSUMER_MONITOR_INITIAL_DELAY: 3600000
+
+#----SECRET----
+#----SECRET----
+AUTO_PAY_SYNC_SERVICE_DB_USERNAME: svc_autopay_config_sync_rw
+AUTO_PAY_SYNC_SERVICE_DB_PASSWORD: n3,vzu76oAQGgeh
+AUTO_PAY_SERVICE_DB_USERNAME: svc_credit_card_payments
+AUTO_PAY_SERVICE_DB_PASSWORD: pDVN8OoJFMU9CLJ&PlXk592XVPmkl2SMwIY
+KAFKA_SASL_SSL_KAFKA_LEGACY_CONSUMER_USERNAME: AUTOPAYSYNC_CONFIG_SRVC_SUB
+KAFKA_SASL_SSL_KAFKA_LEGACY_CONSUMER_PASSWORD: vmmq&5X*YCU0nCr)l$#PiJ4$7P2b51s#
+KAFKA_ONPREM_SSL_TRUSTSTORE_PASSWORD: H60m4CPfK9VX1L9XfeYd-RSrmrGY7U
+src/main/java/com/creditone/ucrm/autopaysynch/config/AutoPayDBConfig.java0 → 100644
++124
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.time.Duration;
+
+import jakarta.annotation.PreDestroy;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.r2dbc.core.DefaultReactiveDataAccessStrategy;
+import org.springframework.data.r2dbc.core.R2dbcEntityOperations;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.data.r2dbc.dialect.PostgresDialect;
+import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
+import org.springframework.r2dbc.connection.R2dbcTransactionManager;
+import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.ReactiveTransactionManager;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
+import io.r2dbc.spi.ConnectionFactories;
+import io.r2dbc.spi.ConnectionFactory;
+import io.r2dbc.spi.ConnectionFactoryOptions;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import static io.r2dbc.spi.ConnectionFactoryOptions.DATABASE;
+import static io.r2dbc.spi.ConnectionFactoryOptions.DRIVER;
+import static io.r2dbc.spi.ConnectionFactoryOptions.HOST;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PASSWORD;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PORT;
+import static io.r2dbc.spi.ConnectionFactoryOptions.USER;
+
+@Slf4j
+@Configuration
+@RefreshScope
+@EnableConfigurationProperties(AutoPayDBConfig.DatabaseConfig.class)
+@EnableR2dbcRepositories(entityOperationsRef = "autopayEntityTemplate", basePackages = "${database.autopay.repository-base-package}")
+@RequiredArgsConstructor
+public class AutoPayDBConfig {
+
+	private final DatabaseConfig databaseConfig;
+	private ConnectionPool connectionPool;
+
+	@Data
+	@ConfigurationProperties("database.autopay")
+	public static class DatabaseConfig {
+		private String host;
+		private Integer port;
+		private String username;
+		private String password;
+		private String databaseName;
+		private Integer initialPoolSize;
+		private Integer maxPoolSize;
+		private Integer maxIdleTime;
+		private String repositoryBasePackage;
+		private Integer maxAcquireTime;
+		private Integer maxCreateConnectionTime;
+		private Integer maxLifeTime;
+		private Integer acquireRetry;
+	}
+
+	@Bean
+	@Qualifier(value = "autopayConnectionFactory")
+	public ConnectionFactory autopayConnectionFactory() {
+		log.info("Initializing AutoPay database connection factory for host: {}, database: {}", databaseConfig.getHost(), databaseConfig.getDatabaseName());
+
+		try {
+			ConnectionFactoryOptions options = ConnectionFactoryOptions.builder().option(DRIVER, "postgresql").option(HOST, databaseConfig.getHost()).option(PORT, databaseConfig
+					.getPort()).option(DATABASE, databaseConfig.getDatabaseName()).option(USER, databaseConfig.getUsername()).option(PASSWORD, databaseConfig.getPassword())
+					.build();
+			ConnectionFactory connectionFactory = ConnectionFactories.get(options);
+			ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder(connectionFactory).initialSize(databaseConfig.getInitialPoolSize()).maxSize(
+					databaseConfig.getMaxPoolSize()).maxIdleTime(Duration.ofMinutes(databaseConfig.getMaxIdleTime())).maxAcquireTime(Duration.ofSeconds(databaseConfig
+							.getMaxAcquireTime())).maxCreateConnectionTime(Duration.ofSeconds(databaseConfig.getMaxCreateConnectionTime())).maxLifeTime(Duration.ofMinutes(
+									databaseConfig.getMaxLifeTime())).acquireRetry(databaseConfig.getAcquireRetry()).validationQuery("SELECT 1").build();
+			connectionPool = new ConnectionPool(poolConfiguration);
+
+			log.info("AutoPay database connection pool initialized successfully");
+
+			return connectionPool;
+		} catch (Exception e) {
+			log.error("Failed to initialize AutoPay database connection factory Error: {} Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+			throw new IllegalStateException("Database connection initialization failed", e);
+		}
+	}
+
+	@Bean
+	public R2dbcEntityOperations autopayEntityTemplate(@Qualifier("autopayConnectionFactory") ConnectionFactory connectionFactory) {
+		log.info("Creating AutoPay R2DBC entity template");
+		DefaultReactiveDataAccessStrategy strategy = new DefaultReactiveDataAccessStrategy(PostgresDialect.INSTANCE);
+		DatabaseClient databaseClient = DatabaseClient.builder().connectionFactory(connectionFactory).bindMarkers(PostgresDialect.INSTANCE.getBindMarkersFactory()).build();
+		return new R2dbcEntityTemplate(databaseClient, strategy);
+	}
+
+	@Bean
+	@Qualifier("autopayTransactionManager")
+	public ReactiveTransactionManager autopayTransactionManager(@Qualifier("autopayConnectionFactory") ConnectionFactory connectionFactory) {
+
+		log.info("Creating AutoPay transaction manager");
+		return new R2dbcTransactionManager(connectionFactory);
+	}
+
+	/** Graceful shutdown of connection pool */
+	@PreDestroy
+	public void cleanup() {
+		log.info("Shutting down AutoPay database connection pool");
+		try {
+			if (connectionPool != null && !connectionPool.isDisposed()) {
+				connectionPool.dispose();
+				log.info("AutoPay database connection pool disposed successfully");
+			}
+		} catch (Exception e) {
+			log.error("Error during AutoPay database connection pool cleanup Error: {}, Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+		}
+	}
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/config/SyncContext.java0 → 100644
++31
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.UUID;
+
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.kafka.event.LegacyToModernSourceEvent;
+
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+public class SyncContext implements Serializable {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	private LegacyToModernSourceEvent legacyEvent;
+	private AutoPaySynchLinkageResponse linkageResponse;
+	private AutoPaySynchLogResponse logResponse;
+	private UUID individualUniqueIdentifierKey;
+	private UUID agentId;
+	private UUID creditAccountId;
+	private UUID externalAccountId;
+	private String externalBankName;
+	private String externalAccountLast4;
+	private String correlationId;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPayDAO.java0 → 100644
++14
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.repository.autopay.AutoPayRepository;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class AutoPayDAO {
+
+	private final AutoPayRepository autoPayRepository;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPayHistoryDAO.java0 → 100644
++14
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.repository.autopay.AutoPayHistoryRepository;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class AutoPayHistoryDAO {
+
+	private final AutoPayHistoryRepository autoPayHistoryRepository;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPayHistoryMapper.java0 → 100644
++88
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import com.creditone.ucrm.autopaysynch.dto.AutoPayHistoryDTO;
+import com.creditone.ucrm.autopaysynch.dto.AutoPayHistoryResponse;
+import com.creditone.ucrm.autopaysynch.model.AutoPayHistoryEntity;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class AutoPayHistoryMapper {
+
+	private static final ObjectMapper OBJECT_MAPPER = createObjectMapper();
+
+	private static ObjectMapper createObjectMapper() {
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.registerModule(new JavaTimeModule());
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		return mapper;
+	}
+
+	public static AutoPayHistoryResponse toDto(AutoPayHistoryEntity entity) {
+		if (entity == null) {
+			return null;
+		}
+		AutoPayHistoryResponse dto = new AutoPayHistoryResponse();
+		dto.setAutoPayId(entity.getAutoPayId());
+		dto.setCustomerId(entity.getCustomerId());
+		dto.setCreditAccountId(entity.getCreditAccountId());
+		dto.setCreatedBy(entity.getCreatedBy());
+		dto.setCreatedTimestamp(entity.getCreatedTimestamp());
+		dto.setUpdatedBy(entity.getUpdatedBy());
+		dto.setUpdatedTimestamp(entity.getUpdatedTimestamp());
+		dto.setIntentCode(entity.getIntentCode());
+		dto.setAutoPayEnabled(entity.getAutoPayEnabled());
+		dto.setAutoPayHistoryDTO(safeJsonToObject(entity.getAutoPayHistoryData(), AutoPayHistoryDTO.class, new AutoPayHistoryDTO()));
+		return dto;
+	}
+
+	public static AutoPayHistoryEntity toEntity(AutoPayHistoryResponse dto) {
+
+		if (dto == null) {
+			return null;
+		}
+		AutoPayHistoryEntity entity = new AutoPayHistoryEntity();
+		entity.setAutoPayId(dto.getAutoPayId());
+		entity.setCustomerId(dto.getCustomerId());
+		entity.setCreditAccountId(dto.getCreditAccountId());
+		entity.setCreatedBy(dto.getCreatedBy());
+		entity.setCreatedTimestamp(dto.getCreatedTimestamp());
+		entity.setUpdatedBy(dto.getUpdatedBy());
+		entity.setUpdatedTimestamp(dto.getUpdatedTimestamp());
+		entity.setIntentCode(dto.getIntentCode());
+		entity.setAutoPayEnabled(dto.getAutoPayEnabled());
+		entity.setAutoPayHistoryData(safeObjectToJson(dto.getAutoPayHistoryDTO(), "{\"autoPayHistory\":[]}"));
+		return entity;
+	}
+
+	private static <T> T safeJsonToObject(Json json, Class<T> clazz, T defaultValue) {
+
+		if (json == null) {
+			return defaultValue;
+		}
+		try {
+			return OBJECT_MAPPER.readValue(json.asString(), clazz);
+		} catch (Exception e) {
+			log.warn("Failed to deserialize JSON for {}", clazz.getSimpleName(), e);
+			return defaultValue;
+		}
+	}
+
+	private static Json safeObjectToJson(Object obj, String defaultJson) {
+
+		if (obj == null) {
+			return Json.of(defaultJson);
+		}
+		try {
+			return Json.of(OBJECT_MAPPER.writeValueAsString(obj));
+		} catch (Exception e) {
+			log.warn("Failed to serialize object {}", obj.getClass().getSimpleName(), e);
+			return Json.of(defaultJson);
+		}
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPayMapper.java0 → 100644
++83
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import com.creditone.ucrm.autopaysynch.dto.AutoPayData;
+import com.creditone.ucrm.autopaysynch.dto.AutoPayResponse;
+import com.creditone.ucrm.autopaysynch.model.AutoPayEntity;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class AutoPayMapper {
+
+	private static final ObjectMapper OBJECT_MAPPER = createObjectMapper();
+
+	private static ObjectMapper createObjectMapper() {
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.registerModule(new JavaTimeModule());
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		return mapper;
+	}
+
+	public static AutoPayResponse toDto(AutoPayEntity entity) {
+		if (entity == null) {
+			return null;
+		}
+		AutoPayResponse dto = new AutoPayResponse();
+		dto.setAutoPayId(entity.getAutoPayId());
+		dto.setCustomerId(entity.getCustomerId());
+		dto.setCreditAccountId(entity.getCreditAccountId());
+		dto.setCreatedBy(entity.getCreatedBy());
+		dto.setCreatedTimestamp(entity.getCreatedTimestamp());
+		dto.setUpdatedBy(entity.getUpdatedBy());
+		dto.setUpdatedTimestamp(entity.getUpdatedTimestamp());
+		dto.setAutoPaymentDay(entity.getAutoPaymentDay());
+		dto.setAutoPayData(safeJsonToObject(entity.getAutoPayData(), AutoPayData.class, new AutoPayData()));
+		return dto;
+	}
+
+	public static AutoPayEntity toEntity(AutoPayResponse dto) {
+		if (dto == null) {
+			return null;
+		}
+		AutoPayEntity entity = new AutoPayEntity();
+		entity.setAutoPayId(dto.getAutoPayId());
+		entity.setCustomerId(dto.getCustomerId());
+		entity.setCreditAccountId(dto.getCreditAccountId());
+		entity.setCreatedBy(dto.getCreatedBy());
+		entity.setCreatedTimestamp(dto.getCreatedTimestamp());
+		entity.setUpdatedBy(dto.getUpdatedBy());
+		entity.setUpdatedTimestamp(dto.getUpdatedTimestamp());
+		entity.setAutoPaymentDay(dto.getAutoPaymentDay());
+		entity.setAutoPayData(safeObjectToJson(dto.getAutoPayData(), "{}"));
+		return entity;
+	}
+
+	private static <T> T safeJsonToObject(Json json, Class<T> clazz, T defaultValue) {
+		if (json == null) {
+			return defaultValue;
+		}
+		try {
+			return OBJECT_MAPPER.readValue(json.asString(), clazz);
+		} catch (Exception e) {
+			log.warn("Failed to deserialize JSON for {}", clazz.getSimpleName(), e);
+			return defaultValue;
+		}
+	}
+
+	private static Json safeObjectToJson(Object obj, String defaultJson) {
+		if (obj == null) {
+			return Json.of(defaultJson);
+		}
+		try {
+			return Json.of(OBJECT_MAPPER.writeValueAsString(obj));
+		} catch (Exception e) {
+			log.warn("Failed to serialize object {}", obj.getClass().getSimpleName(), e);
+			return Json.of(defaultJson);
+		}
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPaySynchLinkageMapper.java
++100
+−1
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import com.creditone.ucrm.autopaysynch.dto.ActivityDTO;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.ConfigData;
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLinkageEntity;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class AutoPaySynchLinkageMapper {
+
+	// All static mapping from entity to response dto and vice versa
+	private static final ObjectMapper OBJECT_MAPPER = createObjectMapper();
+
+	private static ObjectMapper createObjectMapper() {
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.registerModule(new JavaTimeModule());
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		return mapper;
+	}
+
+	public static AutoPaySynchLinkageResponse toDto(AutoPaySynchLinkageEntity entity) {
+		if (entity == null) {
+			return null;
+		}
+		AutoPaySynchLinkageResponse dto = new AutoPaySynchLinkageResponse();
+		dto.setAutoPaySyncLinkageId(entity.getAutoPaySyncLinkageId());
+		dto.setOriginSystem(entity.getOriginSystem());
+		dto.setLegacyAutopayId(entity.getLegacyAutopayId());
+		dto.setAutopayId(entity.getAutopayId());
+		dto.setLegacyCustomerId(entity.getLegacyCustomerId());
+		dto.setLegacyCardAccountId(entity.getLegacyCardAccountId());
+		dto.setLegacyAgentId(entity.getLegacyAgentId());
+		dto.setIndividualUniqueIdentifierKey(entity.getIndividualUniqueIdentifierKey());
+		dto.setCreditAccountID(entity.getCreditAccountId());
+		dto.setAgentId(entity.getAgentId());
+		dto.setSyncAttempt(entity.getSyncAttempt());
+		dto.setChannel(entity.getChannel());
+		dto.setEventStatus(entity.getEventStatus());
+		dto.setCreatedBy(entity.getCreatedBy());
+		dto.setCreatedTimestamp(entity.getCreatedTimestamp());
+		dto.setUpdatedBy(entity.getUpdatedBy());
+		dto.setUpdatedTimestamp(entity.getUpdatedTimestamp());
+		dto.setConfigData(safeJsonToObject(entity.getConfigData(), ConfigData.class, new ConfigData()));
+		dto.setActivityData(safeJsonToObject(entity.getActivityData(), ActivityDTO.class, new ActivityDTO()));
+		return dto;
+	}
+
+	public static AutoPaySynchLinkageEntity toEntity(AutoPaySynchLinkageResponse dto) {
+		if (dto == null) {
+			return null;
+		}
+		AutoPaySynchLinkageEntity entity = new AutoPaySynchLinkageEntity();
+		entity.setAutoPaySyncLinkageId(dto.getAutoPaySyncLinkageId());
+		entity.setOriginSystem(dto.getOriginSystem());
+		entity.setLegacyAutopayId(dto.getLegacyAutopayId());
+		entity.setAutopayId(dto.getAutopayId());
+		entity.setLegacyCustomerId(dto.getLegacyCustomerId());
+		entity.setLegacyCardAccountId(dto.getLegacyCardAccountId());
+		entity.setLegacyAgentId(dto.getLegacyAgentId());
+		entity.setIndividualUniqueIdentifierKey(dto.getIndividualUniqueIdentifierKey());
+		entity.setCreditAccountId(dto.getCreditAccountID());
+		entity.setAgentId(dto.getAgentId());
+		entity.setSyncAttempt(dto.getSyncAttempt());
+		entity.setChannel(dto.getChannel());
+		entity.setEventStatus(dto.getEventStatus());
+		entity.setCreatedBy(dto.getCreatedBy());
+		entity.setCreatedTimestamp(dto.getCreatedTimestamp());
+		entity.setUpdatedBy(dto.getUpdatedBy());
+		entity.setUpdatedTimestamp(dto.getUpdatedTimestamp());
+		entity.setNew(dto.isNew());
+		entity.setConfigData(safeObjectToJson(dto.getConfigData(), "{}"));
+		entity.setActivityData(safeObjectToJson(dto.getActivityData(), "{\"activityList\":[]}"));
+		return entity;
+	}
+
+	private static <T> T safeJsonToObject(Json json, Class<T> clazz, T defaultValue) {
+		if (json == null) {
+			return defaultValue;
+		}
+		try {
+			return OBJECT_MAPPER.readValue(json.asString(), clazz);
+		} catch (Exception e) {
+			log.warn("Failed to deserialize JSON for {}", clazz.getSimpleName(), e);
+			return defaultValue;
+		}
+	}
+
+	private static Json safeObjectToJson(Object obj, String defaultJson) {
+		if (obj == null) {
+			return Json.of(defaultJson);
+		}
+		try {
+			return Json.of(OBJECT_MAPPER.writeValueAsString(obj));
+		} catch (Exception e) {
+			log.warn("Failed to serialize object {}", obj.getClass().getSimpleName(), e);
+			return Json.of(defaultJson);
+		}
+	}
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPaySynchLogDAO.java
++26
+−0
+Original line number	Diff line number	Diff line
+
+@@ -2,14 +2,40 @@ package com.creditone.ucrm.autopaysynch.dao;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLogEntity;
+import com.creditone.ucrm.autopaysynch.repository.autopaysync.AutoPaySynchLogRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AutoPaySynchLogDAO {
+
+	private final AutoPaySynchLogRepository autoPaySynchLogRepository;
+
+	public Mono<AutoPaySynchLogResponse> saveEventLogHistory(AutoPaySynchLogResponse logResponse, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Start of saveEventLogHistory(). AutoPaySynchLogResponse: {}", correlationId, logResponse);
+		AutoPaySynchLogEntity autoPaySynchLogEntity = AutoPaySynchLogMapper.responseToEntity(logResponse);
+		return autoPaySynchLogRepository.save(autoPaySynchLogEntity).doOnSuccess(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+				+ "Successfully saved event log history. autoPaySyncLogId: {}", correlationId, response.getAutoPaySyncLogId())).doOnError(error -> log.error(
+						AutoPaySynchConstant.LOG_PREFIX + "Error occurred while saving event log history. error: {}", correlationId,
+						org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(error))).map(AutoPaySynchLogMapper::entityToResponse);
+	}
+
+	public Mono<Boolean> updateErrorEventLogHistory(AutoPaySynchLogResponse logResponse, Throwable error, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Start of updateErrorEventLogHistory()", correlationId);
+		String stackTrace = org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(error);
+		return autoPaySynchLogRepository.findById(logResponse.getAutoPaySyncLogId()).flatMap(entity -> {
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "Updating error reason for AutoPaySyncLogId: {}", correlationId, entity.getAutoPaySyncLogId());
+			entity.setReason(stackTrace);
+			return autoPaySynchLogRepository.save(entity);
+		}).doOnSuccess(saved -> log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully updated error reason in event log. AutoPaySyncLogId: {}", correlationId, saved
+				.getAutoPaySyncLogId())).doOnError(err -> log.error(AutoPaySynchConstant.LOG_PREFIX + "Failed updating error reason for error: {}", correlationId,
+						org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(err))).map(saved -> true).defaultIfEmpty(false).onErrorReturn(false);
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dao/AutoPaySynchLogMapper.java
++42
+−2
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+public class AutoPaySynchLogMapper {
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLogEntity;
+
+	// All static mapping from entity to response dto and vice versa
+public final class AutoPaySynchLogMapper {
+
+	private AutoPaySynchLogMapper() {
+	}
+
+	public static AutoPaySynchLogResponse entityToResponse(AutoPaySynchLogEntity entity) {
+		if (entity == null) {
+			return null;
+		}
+		AutoPaySynchLogResponse dto = new AutoPaySynchLogResponse();
+		dto.setAutoPaySyncLogId(entity.getAutoPaySyncLogId());
+		dto.setOriginSystem(entity.getOriginSystem());
+		dto.setEventStatus(entity.getEventStatus());
+		dto.setReason(entity.getReason());
+		dto.setApSyncData(entity.getApSyncData());
+		dto.setApConfigLinkageId(entity.getApConfigLinkageId());
+		dto.setCreatedBy(entity.getCreatedBy());
+		dto.setCreatedTimestamp(entity.getCreatedTimestamp());
+		dto.setUpdatedBy(entity.getUpdatedBy());
+		dto.setUpdatedTimestamp(entity.getUpdatedTimestamp());
+		return dto;
+	}
+
+	public static AutoPaySynchLogEntity responseToEntity(AutoPaySynchLogResponse dto) {
+		if (dto == null) {
+			return null;
+		}
+		AutoPaySynchLogEntity entity = new AutoPaySynchLogEntity();
+		entity.setAutoPaySyncLogId(dto.getAutoPaySyncLogId());
+		entity.setOriginSystem(dto.getOriginSystem());
+		entity.setEventStatus(dto.getEventStatus());
+		entity.setReason(dto.getReason());
+		entity.setApSyncData(dto.getApSyncData());
+		entity.setApConfigLinkageId(dto.getApConfigLinkageId());
+		entity.setCreatedBy(dto.getCreatedBy());
+		entity.setCreatedTimestamp(dto.getCreatedTimestamp());
+		entity.setUpdatedBy(dto.getUpdatedBy());
+		entity.setUpdatedTimestamp(dto.getUpdatedTimestamp());
+		entity.setNew(dto.isNew());
+		return entity;
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/ActivityDTO.java0 → 100644
++26
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+public class ActivityDTO {
+
+	private LocalDateTime lastSuccessfullEventTimestamp;
+	private List<ActivityDataDTO> activityList = new ArrayList<>();
+
+	@Data
+	public static class ActivityDataDTO {
+		private UUID logId;
+		private LocalDateTime eventTimestamp;
+		private String eventStatus;
+		private String correlationId;
+		private String origin;
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPayData.java0 → 100644
++24
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.UUID;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import lombok.Data;
+
+@Data
+public class AutoPayData {
+
+	private UUID agentId;
+	private String channel;
+	private BigDecimal paymentAmount;
+	private String paymentPurpose;
+	private String externalBankName;
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private LocalDate firstAutoPayDate;
+	private UUID externalAccountId;
+	private String creditAccountLast4;
+	private String externalAccountLast4;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPayHistoryDTO.java0 → 100644
++29
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.util.List;
+
+import lombok.Data;
+
+@Data
+public class AutoPayHistoryDTO {
+
+	private List<AutoPayHistoryData> autoPayHistory;
+
+	@Data
+	public static class AutoPayHistoryData {
+
+		private String agentId;
+		private String channel;
+		private Integer version;
+		private Integer paymentAmount;
+		private String paymentPurpose;
+		private String autoPayEventDate;
+		private String externalBankName;
+		private String firstAutoPayDate;
+		private String externalAccountId;
+		private String autoPayEventStatus;
+		private String externalAccountLast4;
+		private String communicationRequestId;
+
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPayHistoryResponse.java0 → 100644
++21
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import lombok.Data;
+
+@Data
+public class AutoPayHistoryResponse {
+
+	private UUID autoPayId;
+	private UUID customerId;
+	private UUID creditAccountId;
+	private AutoPayHistoryDTO autoPayHistoryDTO;
+	private String createdBy;
+	private ZonedDateTime createdTimestamp;
+	private String updatedBy;
+	private ZonedDateTime updatedTimestamp;
+	private String intentCode;
+	private Boolean autoPayEnabled;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPayResponse.java0 → 100644
++20
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import lombok.Data;
+
+@Data
+public class AutoPayResponse {
+
+	private UUID autoPayId;
+	private UUID customerId;
+	private UUID creditAccountId;
+	private AutoPayData autoPayData;
+	private String createdBy;
+	private ZonedDateTime createdTimestamp;
+	private String updatedBy;
+	private ZonedDateTime updatedTimestamp;
+	private Integer autoPaymentDay;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPaySynchLinkageResponse.java
++29
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+public class AutoPaySynchLinkageResponse {
+
+	private UUID autoPaySyncLinkageId;
+	private String originSystem;
+	private String legacyAutopayId;
+	private UUID autopayId;
+	private String legacyCustomerId;
+	private String legacyCardAccountId;
+	private String legacyAgentId;
+	private UUID individualUniqueIdentifierKey;
+	private UUID creditAccountID;
+	private UUID agentId;
+	private Integer syncAttempt;
+	private ConfigData configData;
+	private ActivityDTO activityData;
+	private String channel;
+	private String eventStatus;
+	private String createdBy;
+	private ZonedDateTime createdTimestamp;
+	private String updatedBy;
+	private ZonedDateTime updatedTimestamp;
+	private boolean isNew;
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/AutoPaySynchLogResponse.java
++20
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+public class AutoPaySynchLogResponse {
+
+	private UUID autoPaySyncLogId;
+	private String originSystem;
+	private String eventStatus;
+	private String reason;
+	private Json apSyncData;
+	private UUID apConfigLinkageId;
+	private String createdBy;
+	private ZonedDateTime createdTimestamp;
+	private String updatedBy;
+	private ZonedDateTime updatedTimestamp;
+	private boolean isNew;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/dto/ConfigData.java0 → 100644
++33
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.UUID;
+
+import jakarta.validation.constraints.Digits;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+public class ConfigData {
+
+	private UUID agentId;
+	private String channel;
+	private Integer version;
+	@Digits(integer = 10, fraction = 2)
+	private BigDecimal paymentAmount;
+	private String paymentPurpose;
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private LocalDate autoPayEventDate;
+	private String externalBankName;
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private LocalDate firstAutoPayDate;
+	private UUID externalAccountId;
+	private String autoPayEventStatus;
+	private String externalAccountLast4;
+	private String communicationRequestId;
+}
+src/main/java/com/creditone/ucrm/autopaysynch/model/AutoPayEntity.java0 → 100644
++69
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@Table("payments.auto_pay")
+public class AutoPayEntity implements Serializable, Persistable<UUID> {
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	@Id
+	@Column("autopay_id")
+	private UUID autoPayId;
+
+	@Column("customer_id")
+	private UUID customerId;
+
+	@Column("credit_account_id")
+	private UUID creditAccountId;
+
+	@Column("autopay_data")
+	private Json autoPayData;
+
+	@Column("created_by")
+	private String createdBy;
+
+	@Column("created_timestamp")
+	private ZonedDateTime createdTimestamp;
+
+	@Column("updated_by")
+	private String updatedBy;
+
+	@Column("updated_timestamp")
+	private ZonedDateTime updatedTimestamp;
+
+	@Column("auto_payment_day")
+	private Integer autoPaymentDay;
+
+	public AutoPayEntity(UUID autoPayId) {
+		this.setAutoPayId(autoPayId);
+	}
+
+	@Transient
+	private boolean isNew;
+
+	@Override
+	public UUID getId() {
+		return autoPayId;
+	}
+
+	@Override
+	public boolean isNew() {
+		return isNew;
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/model/AutoPayHistoryEntity.java0 → 100644
++69
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@Table("payments.auto_pay_history")
+public class AutoPayHistoryEntity implements Serializable, Persistable<UUID> {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	@Id
+	@Column("autopay_id")
+	private UUID autoPayId;
+
+	@Column("customer_id")
+	private UUID customerId;
+
+	@Column("credit_account_id")
+	private UUID creditAccountId;
+
+	@Column("autopay_history_data")
+	private Json autoPayHistoryData;
+
+	@Column("created_by")
+	private String createdBy;
+
+	@Column("created_timestamp")
+	private ZonedDateTime createdTimestamp;
+
+	@Column("updated_by")
+	private String updatedBy;
+
+	@Column("updated_timestamp")
+	private ZonedDateTime updatedTimestamp;
+
+	@Column("intent_code")
+	private String intentCode;
+
+	@Column("autopay_enabled")
+	private Boolean autoPayEnabled;
+
+	@Transient
+	private boolean isNew;
+
+	@Override
+	public UUID getId() {
+		return autoPayId;
+	}
+
+	@Override
+	public boolean isNew() {
+		return isNew;
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/model/AutoPaySynchLinkageEntity.java
++55
+−1
+Original line number	Diff line number	Diff line
+
+@@ -2,6 +2,7 @@ package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+
+@@ -10,6 +11,7 @@ import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+
+@@ -25,7 +27,59 @@ public class AutoPaySynchLinkageEntity implements Serializable, Persistable<UUID
+	@Column("ap_config_linkage_id")
+	private UUID autoPaySyncLinkageId;
+
+	// TODO add other column details
+	@Column("origin_system")
+	private String originSystem;
+
+	@Column("legacy_autopay_id")
+	private String legacyAutopayId;
+
+	@Column("autopay_id")
+	private UUID autopayId;
+
+	@Column("legacy_customer_id")
+	private String legacyCustomerId;
+
+	@Column("legacy_card_account_id")
+	private String legacyCardAccountId;
+
+	@Column("legacy_agent_id")
+	private String legacyAgentId;
+
+	@Column("created_by")
+	private String createdBy;
+
+	@Column("created_timestamp")
+	private ZonedDateTime createdTimestamp;
+
+	@Column("updated_by")
+	private String updatedBy;
+
+	@Column("updated_timestamp")
+	private ZonedDateTime updatedTimestamp;
+
+	@Column("sync_attempt")
+	private Integer syncAttempt;
+
+	@Column("config_data")
+	private Json configData;
+
+	@Column("channel")
+	private String channel;
+
+	@Column("event_status")
+	private String eventStatus;
+
+	@Column("individual_unique_identifier_key")
+	private UUID individualUniqueIdentifierKey;
+
+	@Column("credit_account_id")
+	private UUID creditAccountId;
+
+	@Column("agent_id")
+	private UUID agentId;
+
+	@Column("activity_data")
+	private Json activityData;
+
+	@Transient
+	private boolean isNew;
+
+src/main/java/com/creditone/ucrm/autopaysynch/model/AutoPaySynchLogEntity.java
++28
+−1
+Original line number	Diff line number	Diff line
+
+@@ -2,6 +2,7 @@ package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+
+@@ -10,6 +11,7 @@ import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+
+@@ -25,7 +27,32 @@ public class AutoPaySynchLogEntity implements Serializable, Persistable<UUID> {
+	@Column("ap_config_sync_id")
+	private UUID autoPaySyncLogId;
+
+	// TODO add other column details
+	@Column("origin_system")
+	private String originSystem;
+
+	@Column("event_status")
+	private String eventStatus;
+
+	@Column("reason")
+	private String reason;
+
+	@Column("ap_sync_data")
+	private Json apSyncData;
+
+	@Column("ap_config_linkage_id")
+	private UUID apConfigLinkageId;
+
+	@Column("created_by")
+	private String createdBy;
+
+	@Column("created_timestamp")
+	private ZonedDateTime createdTimestamp;
+
+	@Column("updated_by")
+	private String updatedBy;
+
+	@Column("updated_timestamp")
+	private ZonedDateTime updatedTimestamp;
+
+	@Transient
+	private boolean isNew;
+
+src/main/java/com/creditone/ucrm/autopaysynch/processor/AutoPayDBProcessor.java0 → 100644
++19
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.dao.AutoPayDAO;
+import com.creditone.ucrm.autopaysynch.dao.AutoPayHistoryDAO;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AutoPayDBProcessor {
+
+	private final AutoPayDAO autoPayDAO;
+	private final AutoPayHistoryDAO autoPayHistoryDAO;
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/processor/CommonSyncProcessor.java
++33
+−3
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.processor;
+
+import java.time.ZonedDateTime;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dao.AutoPaySynchLogDAO;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.kafka.event.EventWithCorrelationData;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class CommonSyncProcessor {
+
+	private final AutoPaySynchLogDAO autoPaySynchLogDAO;
+
+	public Mono<ResultDTO> handleError(EventWithCorrelationData<?> eventWithCorrelation, AutoPaySynchLogResponse activityResponse, SyncType syncType, Throwable error) {
+		// TODO save fatal error which cannot be processed for later processing
+		return Mono.empty();
+		String correlationId = eventWithCorrelation.getCorrelationId();
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Handling error for syncType: {} eventPayload: {} error: {}", correlationId, syncType, eventWithCorrelation.getRecord().value(),
+				org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(error));
+		activityResponse.setUpdatedBy("SYNC_SERVICE");
+		activityResponse.setUpdatedTimestamp(ZonedDateTime.now());
+		return autoPaySynchLogDAO.updateErrorEventLogHistory(activityResponse, error, correlationId).map(response -> new ResultDTO(response, error)).doOnSuccess(result -> log.info(
+				AutoPaySynchConstant.LOG_PREFIX + "Finished handleError for syncType: {} result: {}", correlationId, syncType, result)).doOnError(err -> log.error(
+						AutoPaySynchConstant.LOG_PREFIX + "handleError failed for syncType: {} error: {}", correlationId, syncType,
+						org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(err).replaceAll("[\\r\\n\\t]+", " "), err));
+	}
+
+	public Mono<AutoPaySynchLogResponse> saveEvent(EventWithCorrelationData<?> eventWithCorrelation, SyncType syncType) {
+		return null;
+		String correlationId = eventWithCorrelation.getCorrelationId();
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "saving event for syncType: {} eventPayload: {}", correlationId, syncType);
+		AutoPaySynchLogResponse logResponse = new AutoPaySynchLogResponse();
+		logResponse.setApSyncData(Json.of(eventWithCorrelation.getRecord().value()));
+		logResponse.setOriginSystem(AutoPaySynchConstant.OriginSystem.LEGACY.name());
+		logResponse.setCreatedTimestamp(ZonedDateTime.now());
+		logResponse.setCreatedBy("SYNC_SERVICE");
+		logResponse.setNew(true);
+		//		logResponse.setEventStatus();
+		//		logResponse.setReason();
+		//		logResponse.setApConfigLinkageId();
+		return autoPaySynchLogDAO.saveEventLogHistory(logResponse, correlationId).doOnSuccess(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+				+ "Finished saveEvent for syncType: {} savedResponse: {}", correlationId, syncType, response)).doOnError(err -> log.error(AutoPaySynchConstant.LOG_PREFIX
+						+ "saveEvent failed for syncType: {} error: {}", correlationId, syncType, org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(err).replaceAll(
+								"[\\r\\n\\t]+", " "), err));
+	}
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/processor/LegacyToModernProcessor.java
++110
+−2
+Original line number	Diff line number	Diff line
+
+@@ -2,20 +2,128 @@ package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.config.SyncContext;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.kafka.event.LegacyToModernSourceEvent;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Component
+@Slf4j
+@RequiredArgsConstructor
+public class LegacyToModernProcessor {
+
+	public Mono<ResultDTO> processEvent(LegacyToModernSourceEvent event, AutoPaySynchLogResponse logResponse, String correlationId) {
+		// TODO Auto-generated method stub
+		return null;
+
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Starting {} autopay sync process.", correlationId, SyncType.LEGACY_TO_MODERN);
+
+		return findOrCreateLinkage(event, logResponse, correlationId).flatMap(linkageResponse -> prepareInitialSyncContext(event, linkageResponse, logResponse, correlationId))
+				.flatMap(context -> executeSyncMappingFlow(context).flatMap(this::handleSuccess).onErrorResume(error -> handleError(context, error)));
+	}
+
+	private Mono<AutoPaySynchLinkageResponse> findOrCreateLinkage(LegacyToModernSourceEvent event, AutoPaySynchLogResponse logResponse, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding or creating linkage.", correlationId);
+
+		// TODO: Implement linkage find or create logic
+		return Mono.empty();
+	}
+
+	private Mono<SyncContext> prepareInitialSyncContext(LegacyToModernSourceEvent event, AutoPaySynchLinkageResponse linkageResponse, AutoPaySynchLogResponse logResponse, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Preparing initial sync context with event: {} linkageResponse: {} ", correlationId, event, linkageResponse);
+
+		SyncContext context = SyncContext.builder().legacyEvent(event).linkageResponse(linkageResponse).logResponse(logResponse).correlationId(correlationId).build();
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> executeSyncMappingFlow(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Executing {} autopay sync mapping flow for context: {}", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN, context);
+
+		return Mono.just(context).flatMap(this::findModernCustomerId).flatMap(this::findModernAgentId).flatMap(this::findModernCreditAccountId).flatMap(
+				this::findModernExternalBankAccountDetails).flatMap(this::saveAutopayAndHistory);
+	}
+
+	private Mono<SyncContext> findModernCustomerId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern customer ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern customer ID lookup
+		// TODO: Set context.setIndividualUniqueIdentifierKey(customerId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernAgentId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern agent ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern agent ID lookup
+		// TODO: Set context.setAgentId(agentId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernCreditAccountId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern credit account ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern credit account ID lookup
+		// TODO: Set context.setCreditAccountId(creditAccountId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernExternalBankAccountDetails(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern external bank account details using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement external bank account details lookup
+		// TODO: Set context.setExternalAccountId(externalAccountId)
+		// TODO: Set context.setExternalBankName(bankName)
+		// TODO: Set context.setExternalAccountLast4(accountLast4)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> saveAutopayAndHistory(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Saving autopay and history using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement autopay and auto pay history save or update logic
+
+		return Mono.just(context);
+	}
+
+	private Mono<Void> upsertLinkageAndLog(SyncContext context, boolean isSuccess, Throwable error) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Upserting linkage and log using context: {} success: {}", context.getCorrelationId(), context, isSuccess);
+
+		// TODO: Implement linkage and log upsert logic
+		// TODO: Update linkage/log with success or failure status
+		// TODO: If isSuccess is false, include error details from the error parameter
+		// TODO: Log partial sync state from context (which fields were successfully mapped)
+
+		return Mono.empty();
+	}
+
+	private Mono<ResultDTO> handleSuccess(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully completed {} autopay sync process.", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN);
+
+		return upsertLinkageAndLog(context, true, null).map(ctx -> new ResultDTO(true, null));
+	}
+
+	private Mono<ResultDTO> handleError(SyncContext context, Throwable error) {
+		log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in {} autopay sync process using context: {} error: {}", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN, context,
+				error.getMessage());
+
+		// TODO: Access all values set in context up to the failure point:
+		// TODO: - context.getIndividualUniqueIdentifierKey()
+		// TODO: - context.getAgentId()
+		// TODO: - context.getCreditAccountId()
+		// TODO: - context.getExternalAccountId()
+		// TODO: - context.getExternalBankName()
+		// TODO: - context.getExternalAccountLast4()
+
+		return upsertLinkageAndLog(context, false, error).map(ctx -> new ResultDTO(false, error));
+	}
+}
+src/main/java/com/creditone/ucrm/autopaysynch/repository/autopay/AutoPayHistoryRepository.java0 → 100644
++13
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.repository.autopay;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPayHistoryEntity;
+
+@Repository
+public interface AutoPayHistoryRepository extends R2dbcRepository<AutoPayHistoryEntity, UUID> {
+
+}
+src/main/java/com/creditone/ucrm/autopaysynch/repository/autopay/AutoPayRepository.java0 → 100644
++12
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.repository.autopay;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPayEntity;
+
+@Repository
+public interface AutoPayRepository extends R2dbcRepository<AutoPayEntity, UUID> {
+}
+src/main/resources/application.properties
++15
+−0
+Original line number	Diff line number	Diff line
+
+@@ -17,6 +17,21 @@ database.autopaysync.max-create-connection-time=${AUTO_PAY_SYNC_SERVICE_MAX_CREA
+database.autopaysync.max-life-time=${AUTO_PAY_SYNC_SERVICE_MAX_LIFETIME:120}
+database.autopaysync.acquire-retry=${AUTO_PAY_SYNC_SERVICE_ACQUIRE_RETRY:3}
+
+# Database configuration for autopay
+database.autopay.host=${AUTO_PAY_SERVICE_DB_JDBC_HOST:crd-app-dev-pgsql-inst01.v7f.dv01.c1busw2.aws}
+database.autopay.port=${AUTO_PAY_SERVICE_DB_PORT:5555}
+database.autopay.username=${AUTO_PAY_SERVICE_DB_USERNAME}
+database.autopay.password=${AUTO_PAY_SERVICE_DB_PASSWORD}
+database.autopay.database-name=${AUTO_PAY_SERVICE_DB_NAME:credit_card_account}
+database.autopay.max-idle-time=${AUTO_PAY_SERVICE_DB_POOL_MAX_IDLE_TIME:5}
+database.autopay.max-pool-size=${AUTO_PAY_SERVICE_DB_MAX_POOL_SIZE:10}
+database.autopay.initial-pool-size=${AUTO_PAY_SERVICE_DB_INITIAL_POOL_SIZE:3}
+database.autopay.repository-base-package=${AUTO_PAY_SERVICE_DATABASE_REPOSITORY_BASE_PACKAGE:com.creditone.ucrm.autopaysynch.repository.autopay}
+database.autopay.max-acquire-time=${AUTO_PAY_SERVICE_MAX_ACQUIRE_TIME:30}
+database.autopay.max-create-connection-time=${AUTO_PAY_SERVICE_MAX_CREATE_CONNECTION_TIME:10}
+database.autopay.max-life-time=${AUTO_PAY_SERVICE_MAX_LIFETIME:120}
+database.autopay.acquire-retry=${AUTO_PAY_SERVICE_ACQUIRE_RETRY:3}
+
+#HTTP Configuration
+config.http.retry-count=${HTTP_RETRY_COUNT:3}
+config.http.retry-duration-seconds=${HTTP_RETRY_DURATION_SECONDS:5}
+
+src/test/java/com/creditone/ucrm/autopaysynch/config/AutoPayDBConfigTest.java0 → 100644
++276
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.lang.reflect.Field;
+import java.time.Duration;
+
+import org.springframework.data.r2dbc.core.R2dbcEntityOperations;
+import org.springframework.transaction.ReactiveTransactionManager;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
+import io.r2dbc.spi.ConnectionFactories;
+import io.r2dbc.spi.ConnectionFactory;
+import io.r2dbc.spi.ConnectionFactoryOptions;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class AutoPayDBConfigTest {
+
+	@Mock
+	private ConnectionFactory mockConnectionFactory;
+
+	@Mock
+	private ConnectionPool mockConnectionPool;
+
+	@Mock
+	private ConnectionPoolConfiguration.Builder mockBuilder;
+
+	@Mock
+	private ConnectionPoolConfiguration mockPoolConfiguration;
+
+	private AutoPayDBConfig config;
+	private AutoPayDBConfig.DatabaseConfig databaseConfig;
+
+	@BeforeEach
+	void setUp() {
+		databaseConfig = new AutoPayDBConfig.DatabaseConfig();
+		databaseConfig.setHost("localhost");
+		databaseConfig.setPort(5432);
+		databaseConfig.setUsername("testuser");
+		databaseConfig.setPassword("testpass");
+		databaseConfig.setDatabaseName("testdb");
+		databaseConfig.setInitialPoolSize(5);
+		databaseConfig.setMaxPoolSize(20);
+		databaseConfig.setMaxIdleTime(30);
+		databaseConfig.setRepositoryBasePackage("com.test.repository");
+		databaseConfig.setMaxAcquireTime(30);
+		databaseConfig.setMaxCreateConnectionTime(10);
+		databaseConfig.setMaxLifeTime(2);
+		databaseConfig.setAcquireRetry(3);
+
+		config = new AutoPayDBConfig(databaseConfig);
+	}
+
+	@Test
+	void testDatabaseConfigGettersAndSetters() {
+		AutoPayDBConfig.DatabaseConfig dbConfig = new AutoPayDBConfig.DatabaseConfig();
+
+		dbConfig.setHost("testhost");
+		dbConfig.setPort(5433);
+		dbConfig.setUsername("user");
+		dbConfig.setPassword("pass");
+		dbConfig.setDatabaseName("db");
+		dbConfig.setInitialPoolSize(10);
+		dbConfig.setMaxPoolSize(50);
+		dbConfig.setMaxIdleTime(60);
+		dbConfig.setRepositoryBasePackage("com.example");
+		dbConfig.setMaxAcquireTime(45);
+		dbConfig.setMaxCreateConnectionTime(15);
+		dbConfig.setMaxLifeTime(3);
+		dbConfig.setAcquireRetry(5);
+
+		assertEquals("testhost", dbConfig.getHost());
+		assertEquals(5433, dbConfig.getPort());
+		assertEquals("user", dbConfig.getUsername());
+		assertEquals("pass", dbConfig.getPassword());
+		assertEquals("db", dbConfig.getDatabaseName());
+		assertEquals(10, dbConfig.getInitialPoolSize());
+		assertEquals(50, dbConfig.getMaxPoolSize());
+		assertEquals(60, dbConfig.getMaxIdleTime());
+		assertEquals("com.example", dbConfig.getRepositoryBasePackage());
+		assertEquals(45, dbConfig.getMaxAcquireTime());
+		assertEquals(15, dbConfig.getMaxCreateConnectionTime());
+		assertEquals(3, dbConfig.getMaxLifeTime());
+		assertEquals(5, dbConfig.getAcquireRetry());
+	}
+
+	@Test
+	void testDatabaseConfigEqualsAndHashCode() {
+		AutoPayDBConfig.DatabaseConfig config1 = new AutoPayDBConfig.DatabaseConfig();
+		AutoPayDBConfig.DatabaseConfig config2 = new AutoPayDBConfig.DatabaseConfig();
+
+		config1.setHost("localhost");
+		config2.setHost("localhost");
+
+		assertEquals(config1, config2);
+		assertEquals(config1.hashCode(), config2.hashCode());
+
+		config2.setHost("different");
+		assertNotEquals(config1, config2);
+	}
+
+	@Test
+	void testDatabaseConfigToString() {
+		AutoPayDBConfig.DatabaseConfig dbConfig = new AutoPayDBConfig.DatabaseConfig();
+		dbConfig.setHost("localhost");
+		dbConfig.setPort(5432);
+
+		String toString = dbConfig.toString();
+		assertNotNull(toString);
+		assertTrue(toString.contains("localhost"));
+		assertTrue(toString.contains("5432"));
+	}
+
+	@Test
+	void testautopayConnectionFactorySuccess() {
+		try (MockedStatic<ConnectionFactories> connectionFactoriesMock = mockStatic(ConnectionFactories.class);
+				MockedStatic<ConnectionPoolConfiguration> poolConfigMock = mockStatic(ConnectionPoolConfiguration.class);
+				MockedConstruction<ConnectionPool> connectionPoolMock = mockConstruction(ConnectionPool.class)) {
+
+			// Mock ConnectionFactories.get()
+			connectionFactoriesMock.when(() -> ConnectionFactories.get(any(ConnectionFactoryOptions.class))).thenReturn(mockConnectionFactory);
+
+			// Mock ConnectionPoolConfiguration.builder()
+			poolConfigMock.when(() -> ConnectionPoolConfiguration.builder(mockConnectionFactory)).thenReturn(mockBuilder);
+
+			// Setup builder chain
+			when(mockBuilder.initialSize(5)).thenReturn(mockBuilder);
+			when(mockBuilder.maxSize(20)).thenReturn(mockBuilder);
+			when(mockBuilder.maxIdleTime(any(Duration.class))).thenReturn(mockBuilder);
+			when(mockBuilder.maxAcquireTime(any(Duration.class))).thenReturn(mockBuilder);
+			when(mockBuilder.maxCreateConnectionTime(any(Duration.class))).thenReturn(mockBuilder);
+			when(mockBuilder.maxLifeTime(any(Duration.class))).thenReturn(mockBuilder);
+			when(mockBuilder.acquireRetry(3)).thenReturn(mockBuilder);
+			when(mockBuilder.build()).thenReturn(mockPoolConfiguration);
+			when(mockBuilder.validationQuery("SELECT 1")).thenReturn(mockBuilder);
+
+			ConnectionFactory result = config.autopayConnectionFactory();
+
+			assertNotNull(result);
+			assertEquals(1, connectionPoolMock.constructed().size());
+		}
+	}
+
+	@Test
+	void testautopayConnectionFactoryException() {
+		try (MockedStatic<io.r2dbc.spi.ConnectionFactories> connectionFactoriesMock = mockStatic(io.r2dbc.spi.ConnectionFactories.class)) {
+
+			connectionFactoriesMock.when(() -> io.r2dbc.spi.ConnectionFactories.get(any(ConnectionFactoryOptions.class))).thenThrow(new RuntimeException("Connection failed"));
+
+			IllegalStateException exception = assertThrows(IllegalStateException.class, () -> config.autopayConnectionFactory());
+
+			assertEquals("Database connection initialization failed", exception.getMessage());
+			assertNotNull(exception.getCause());
+		}
+	}
+
+	@Test
+	void testautopayEntityTemplate() {
+		R2dbcEntityOperations result = config.autopayEntityTemplate(mockConnectionFactory);
+
+		assertNotNull(result);
+	}
+
+	@Test
+	void testautopayTransactionManager() {
+		ReactiveTransactionManager result = config.autopayTransactionManager(mockConnectionFactory);
+
+		assertNotNull(result);
+	}
+
+	@Test
+	void testCleanupWithValidConnectionPool() throws Exception {
+		// Set up connection pool using reflection
+		setConnectionPoolField(mockConnectionPool);
+
+		when(mockConnectionPool.isDisposed()).thenReturn(false);
+
+		config.cleanup();
+
+		verify(mockConnectionPool).dispose();
+	}
+
+	@Test
+	void testCleanupWithDisposedConnectionPool() throws Exception {
+		// Set up connection pool using reflection
+		setConnectionPoolField(mockConnectionPool);
+
+		when(mockConnectionPool.isDisposed()).thenReturn(true);
+
+		config.cleanup();
+
+		verify(mockConnectionPool, never()).dispose();
+	}
+
+	@Test
+	void testCleanupWithNullConnectionPool() throws Exception {
+		// Ensure connection pool is null
+		setConnectionPoolField(null);
+
+		// Should not throw exception
+		assertDoesNotThrow(() -> config.cleanup());
+	}
+
+	@Test
+	void testCleanupWithException() throws Exception {
+		// Set up connection pool using reflection
+		setConnectionPoolField(mockConnectionPool);
+
+		when(mockConnectionPool.isDisposed()).thenReturn(false);
+		doThrow(new RuntimeException("Dispose failed")).when(mockConnectionPool).dispose();
+
+		// Should not throw exception, just log error
+		assertDoesNotThrow(() -> config.cleanup());
+
+		verify(mockConnectionPool).dispose();
+	}
+
+	@Test
+	void testConstructorWithDatabaseConfig() {
+		AutoPayDBConfig newConfig = new AutoPayDBConfig(databaseConfig);
+		assertNotNull(newConfig);
+	}
+
+	@Test
+	void testDatabaseConfigWithNullValues() {
+		AutoPayDBConfig.DatabaseConfig nullConfig = new AutoPayDBConfig.DatabaseConfig();
+
+		assertNull(nullConfig.getHost());
+		assertNull(nullConfig.getPort());
+		assertNull(nullConfig.getUsername());
+		assertNull(nullConfig.getPassword());
+		assertNull(nullConfig.getDatabaseName());
+		assertNull(nullConfig.getInitialPoolSize());
+		assertNull(nullConfig.getMaxPoolSize());
+		assertNull(nullConfig.getMaxIdleTime());
+		assertNull(nullConfig.getRepositoryBasePackage());
+		assertNull(nullConfig.getMaxAcquireTime());
+		assertNull(nullConfig.getMaxCreateConnectionTime());
+		assertNull(nullConfig.getMaxLifeTime());
+		assertNull(nullConfig.getAcquireRetry());
+	}
+
+	@Test
+	void testDatabaseConfigCanEqual() {
+		AutoPayDBConfig.DatabaseConfig config1 = new AutoPayDBConfig.DatabaseConfig();
+		AutoPayDBConfig.DatabaseConfig config2 = new AutoPayDBConfig.DatabaseConfig();
+		Object otherObject = new Object();
+
+		assertTrue(config1.canEqual(config2));
+		assertFalse(config1.canEqual(otherObject));
+		assertFalse(config1.canEqual(null));
+	}
+
+	private void setConnectionPoolField(ConnectionPool connectionPool) throws Exception {
+		Field field = AutoPayDBConfig.class.getDeclaredField("connectionPool");
+		field.setAccessible(true);
+		field.set(config, connectionPool);
+	}
+
+}
+src/test/java/com/creditone/ucrm/autopaysynch/dao/AutoPaySynchLinkageMapperTest.java0 → 100644
++170
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+
+import com.creditone.ucrm.autopaysynch.dto.ActivityDTO;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.ConfigData;
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLinkageEntity;
+
+import io.r2dbc.postgresql.codec.Json;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+public class AutoPaySynchLinkageMapperTest {
+
+	@Test
+	void testEntityToResponse() {
+
+		AutoPaySynchLinkageEntity entity = new AutoPaySynchLinkageEntity();
+
+		UUID id = UUID.randomUUID();
+		UUID autopayId = UUID.randomUUID();
+		UUID individualId = UUID.randomUUID();
+		UUID creditAccountId = UUID.randomUUID();
+		UUID agentId = UUID.randomUUID();
+
+		entity.setAutoPaySyncLinkageId(id);
+		entity.setOriginSystem("SYSTEM_A");
+		entity.setAutopayId(autopayId);
+		entity.setLegacyCustomerId("cust123");
+		entity.setLegacyCardAccountId("card123");
+		entity.setLegacyAgentId("agent123");
+		entity.setIndividualUniqueIdentifierKey(individualId);
+		entity.setCreditAccountId(creditAccountId);
+		entity.setAgentId(agentId);
+		entity.setSyncAttempt(1);
+
+		entity.setConfigData(Json.of("""
+				{
+				  "agentId":"%s",
+				  "channel":"WEB",
+				  "version":1,
+				  "paymentAmount":19.99,
+				  "paymentPurpose":"MINIMUM_PAYMENT",
+				  "autoPayEventDate":"2025-06-17",
+				  "externalBankName":"BANK",
+				  "firstAutoPayDate":"2025-06-26",
+				  "externalAccountId":"%s",
+				  "autoPayEventStatus":"ENABLED",
+				  "externalAccountLast4":"1234"
+				}
+				""".formatted(agentId, UUID.randomUUID())));
+
+		entity.setActivityData(Json.of("""
+				{
+				  "lastSuccessfullEventTimestamp":"2025-01-01T10:00:00",
+				  "activityList":[
+				    {
+				      "logId":"%s",
+				      "eventTimestamp":"2025-01-01T10:00:00",
+				      "eventStatus":"SUCCESS",
+				      "correlationId":"corr123",
+				      "origin":"SYSTEM"
+				    }
+				  ]
+				}
+				""".formatted(UUID.randomUUID())));
+
+		entity.setChannel("WEB");
+		entity.setEventStatus("SUCCESS");
+		entity.setCreatedBy("tester");
+		entity.setCreatedTimestamp(ZonedDateTime.now());
+		entity.setUpdatedBy("tester2");
+		entity.setUpdatedTimestamp(ZonedDateTime.now());
+
+		AutoPaySynchLinkageResponse dto = AutoPaySynchLinkageMapper.toDto(entity);
+
+		assertNotNull(dto);
+		assertEquals(id, dto.getAutoPaySyncLinkageId());
+		assertEquals("SYSTEM_A", dto.getOriginSystem());
+		assertEquals(autopayId, dto.getAutopayId());
+		assertEquals("cust123", dto.getLegacyCustomerId());
+		assertEquals("WEB", dto.getChannel());
+		assertEquals("SUCCESS", dto.getEventStatus());
+
+		assertNotNull(dto.getConfigData());
+		assertEquals("WEB", dto.getConfigData().getChannel());
+		assertEquals(new BigDecimal("19.99"), dto.getConfigData().getPaymentAmount());
+
+		assertNotNull(dto.getActivityData());
+		assertFalse(dto.getActivityData().getActivityList().isEmpty());
+	}
+
+	@Test
+	void testEntityToResponseNull() {
+		AutoPaySynchLinkageResponse dto = AutoPaySynchLinkageMapper.toDto(null);
+		assertNull(dto);
+	}
+
+	@Test
+	void testResponseToEntity() {
+
+		AutoPaySynchLinkageResponse dto = new AutoPaySynchLinkageResponse();
+
+		UUID id = UUID.randomUUID();
+
+		dto.setAutoPaySyncLinkageId(id);
+		dto.setOriginSystem("SYSTEM_A");
+		dto.setAutopayId(UUID.randomUUID());
+		dto.setLegacyCustomerId("cust123");
+		dto.setLegacyCardAccountId("card123");
+		dto.setLegacyAgentId("agent123");
+		dto.setIndividualUniqueIdentifierKey(UUID.randomUUID());
+		dto.setCreditAccountID(UUID.randomUUID());
+		dto.setAgentId(UUID.randomUUID());
+		dto.setSyncAttempt(2);
+
+		ConfigData configData = new ConfigData();
+		configData.setAgentId(UUID.randomUUID());
+		configData.setChannel("API");
+		configData.setVersion(1);
+		configData.setPaymentAmount(new BigDecimal("25.50"));
+		configData.setPaymentPurpose("MINIMUM_PAYMENT");
+		configData.setAutoPayEventDate(LocalDate.now());
+
+		dto.setConfigData(configData);
+
+		ActivityDTO activityDTO = new ActivityDTO();
+		activityDTO.setLastSuccessfullEventTimestamp(LocalDateTime.now());
+
+		ActivityDTO.ActivityDataDTO activity = new ActivityDTO.ActivityDataDTO();
+		activity.setLogId(UUID.randomUUID());
+		activity.setEventStatus("FAILED");
+		activity.setOrigin("SYSTEM");
+
+		activityDTO.getActivityList().add(activity);
+
+		dto.setActivityData(activityDTO);
+
+		dto.setChannel("API");
+		dto.setEventStatus("FAILED");
+		dto.setCreatedBy("tester");
+		dto.setCreatedTimestamp(ZonedDateTime.now());
+		dto.setUpdatedBy("tester2");
+		dto.setUpdatedTimestamp(ZonedDateTime.now());
+
+		AutoPaySynchLinkageEntity entity = AutoPaySynchLinkageMapper.toEntity(dto);
+
+		assertNotNull(entity);
+		assertEquals(id, entity.getAutoPaySyncLinkageId());
+		assertEquals("SYSTEM_A", entity.getOriginSystem());
+		assertEquals("FAILED", entity.getEventStatus());
+		assertEquals("API", entity.getChannel());
+
+		assertNotNull(entity.getConfigData());
+		assertNotNull(entity.getActivityData());
+	}
+
+	@Test
+	void testResponseToEntityNull() {
+		AutoPaySynchLinkageEntity entity = AutoPaySynchLinkageMapper.toEntity(null);
+		assertNull(entity);
+	}
+}
+src/test/java/com/creditone/ucrm/autopaysynch/dao/AutoPaySynchLogMapperTest.java0 → 100644
++81
+−0
+Original line number	Diff line number	Diff line
+package com.creditone.ucrm.autopaysynch.dao;
+
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLogEntity;
+
+import io.r2dbc.postgresql.codec.Json;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+public class AutoPaySynchLogMapperTest {
+
+	@Test
+	void testEntityToResponse() {
+
+		AutoPaySynchLogEntity entity = new AutoPaySynchLogEntity();
+
+		UUID id = UUID.randomUUID();
+		entity.setAutoPaySyncLogId(id);
+		entity.setOriginSystem("SYSTEM_A");
+		entity.setEventStatus("SUCCESS");
+		entity.setReason("Processed");
+		entity.setApSyncData(Json.of("{\"data\":\"value\"}"));
+		entity.setApConfigLinkageId(UUID.randomUUID());
+		entity.setCreatedBy("tester");
+		entity.setCreatedTimestamp(ZonedDateTime.now());
+		entity.setUpdatedBy("tester2");
+		entity.setUpdatedTimestamp(ZonedDateTime.now());
+
+		AutoPaySynchLogResponse dto = AutoPaySynchLogMapper.entityToResponse(entity);
+
+		assertNotNull(dto);
+		assertEquals(id, dto.getAutoPaySyncLogId());
+		assertEquals("SYSTEM_A", dto.getOriginSystem());
+		assertEquals("SUCCESS", dto.getEventStatus());
+		assertEquals("Processed", dto.getReason());
+	}
+
+	@Test
+	void testEntityToResponseNull() {
+		AutoPaySynchLogResponse dto = AutoPaySynchLogMapper.entityToResponse(null);
+
+		assertNull(dto);
+	}
+
+	@Test
+	void testResponseToEntity() {
+
+		AutoPaySynchLogResponse dto = new AutoPaySynchLogResponse();
+
+		UUID id = UUID.randomUUID();
+		dto.setAutoPaySyncLogId(id);
+		dto.setOriginSystem("SYSTEM_A");
+		dto.setEventStatus("FAILED");
+		dto.setReason("Error occurred");
+		dto.setApSyncData(Json.of("{\"data\":\"value\"}"));
+		dto.setApConfigLinkageId(UUID.randomUUID());
+		dto.setCreatedBy("tester");
+		dto.setCreatedTimestamp(ZonedDateTime.now());
+		dto.setUpdatedBy("tester2");
+		dto.setUpdatedTimestamp(ZonedDateTime.now());
+
+		AutoPaySynchLogEntity entity = AutoPaySynchLogMapper.responseToEntity(dto);
+
+		assertNotNull(entity);
+		assertEquals(id, entity.getAutoPaySyncLogId());
+		assertEquals("SYSTEM_A", entity.getOriginSystem());
+		assertEquals("FAILED", entity.getEventStatus());
+	}
+
+	@Test
+	void testResponseToEntityNull() {
+		AutoPaySynchLogEntity entity = AutoPaySynchLogMapper.responseToEntity(null);
+
+		assertNull(entity);
+	}
+}
