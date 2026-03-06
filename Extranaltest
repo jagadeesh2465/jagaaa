@@ -1,0 +1,341 @@
+package com.creditone.ucrm.autopaysynch.service;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.PageUserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponseMetaData;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkage;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponseContentInner;
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
+
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class ExternalCallServiceTest {
+
+```
+@Mock
+private AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+@Mock
+private ExternalCallService.ExternalServiceConfig externalServiceConfig;
+
+@Mock
+private ExternalCallService.ExternalServiceConfig.CiamConfig ciamConfig;
+
+@Mock
+private ExternalCallService.ExternalServiceConfig.CreditAccountConfig creditAccountConfig;
+
+@Mock
+private ExternalCallService.ExternalServiceConfig.AgentFallbackConfig agentFallbackConfig;
+
+@Mock
+private WebClient.ResponseSpec responseSpec;
+
+private ExternalCallService externalCallService;
+
+private static final String CORRELATION_ID = "corr-test-001";
+private static final String MODERN_CUSTOMER_ID = "uuid-customer-abc-123";
+private static final String LEGACY_CUSTOMER_ID = "12345";
+private static final String MODERN_AGENT_UUID = "uuid-agent-xyz-456";
+private static final String LEGACY_AGENT_CAS_ID = "AG-001";
+private static final String ACCOUNT_ID = "acc-uuid-789";
+private static final String CIAM_HOST = "https://ciam.dev.creditone.com";
+private static final String CIAM_URI = "/api/v1/system-linkages";
+private static final String CREDIT_ACCOUNT_HOST = "https://creditaccount.dev.creditone.com";
+private static final String CREDIT_ACCOUNT_URI = "/api/v1/creditcard/accounts";
+private static final String AGENT_FALLBACK_HOST = "https://hazelcast.dev.creditone.com";
+private static final String AGENT_FALLBACK_URI = "/api/v1/users";
+
+@BeforeEach
+void setUp() {
+	lenient().when(externalServiceConfig.getCiam()).thenReturn(ciamConfig);
+	lenient().when(externalServiceConfig.getCreditAccount()).thenReturn(creditAccountConfig);
+	lenient().when(externalServiceConfig.getAgentFallback()).thenReturn(agentFallbackConfig);
+
+	lenient().when(ciamConfig.getHost()).thenReturn(CIAM_HOST);
+	lenient().when(ciamConfig.getProductsUri()).thenReturn(CIAM_URI);
+	lenient().when(ciamConfig.getApikey()).thenReturn("ciam-api-key");
+
+	lenient().when(creditAccountConfig.getHost()).thenReturn(CREDIT_ACCOUNT_HOST);
+	lenient().when(creditAccountConfig.getAccountsUri()).thenReturn(CREDIT_ACCOUNT_URI);
+	lenient().when(creditAccountConfig.getApikey()).thenReturn("credit-account-api-key");
+
+	lenient().when(agentFallbackConfig.getHost()).thenReturn(AGENT_FALLBACK_HOST);
+	lenient().when(agentFallbackConfig.getHazelcastAgentIdFallbackServiceUri()).thenReturn(AGENT_FALLBACK_URI);
+	lenient().when(agentFallbackConfig.getApikey()).thenReturn("hazelcast-api-key");
+
+	lenient().when(autoPaySyncClientHandler.get(any(), any(), any(), any()))
+			.thenReturn(responseSpec);
+
+	externalCallService = new ExternalCallService(externalServiceConfig, autoPaySyncClientHandler);
+}
+
+// ==================== getModernCreditAccountId ====================
+
+@Test
+void testGetModernCreditAccountId_Success_ReturnsAccountIdDto() {
+	AccountsDetailsResponseContentInner content = new AccountsDetailsResponseContentInner();
+	content.setAccountId(ACCOUNT_ID);
+
+	AccountsDetailsResponse response = new AccountsDetailsResponse();
+	response.setContent(List.of(content));
+
+	when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.getModernCreditAccountId(MODERN_CUSTOMER_ID, CORRELATION_ID))
+			.assertNext(dto -> {
+				assertNotNull(dto);
+				assertEquals(ACCOUNT_ID, dto.getAccountId());
+			})
+			.verifyComplete();
+
+	verify(autoPaySyncClientHandler).get(
+			eq(CREDIT_ACCOUNT_HOST + CREDIT_ACCOUNT_URI), any(), eq("credit-account-service"), any());
+}
+
+@Test
+void testGetModernCreditAccountId_WhenNullResponse_ThrowsException() {
+	AccountsDetailsResponse response = new AccountsDetailsResponse();
+	response.setContent(null);
+
+	when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.getModernCreditAccountId(MODERN_CUSTOMER_ID, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testGetModernCreditAccountId_WhenEmptyContent_ThrowsException() {
+	AccountsDetailsResponse response = new AccountsDetailsResponse();
+	response.setContent(List.of());
+
+	when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.getModernCreditAccountId(MODERN_CUSTOMER_ID, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testGetModernCreditAccountId_WhenApiCallFails_PropagatesError() {
+	when(responseSpec.bodyToMono(AccountsDetailsResponse.class))
+			.thenReturn(Mono.error(new RuntimeException("API call failed")));
+
+	StepVerifier.create(
+			externalCallService.getModernCreditAccountId(MODERN_CUSTOMER_ID, CORRELATION_ID))
+			.expectError(RuntimeException.class)
+			.verify();
+}
+
+// ==================== convertCustomerId ====================
+
+@Test
+void testConvertCustomerId_LegacyToModern_Success() {
+	SystemLinkage linkage = new SystemLinkage();
+	linkage.setIndividualUniqueIdentifier(MODERN_CUSTOMER_ID);
+
+	SystemLinkagesResponse response = new SystemLinkagesResponse();
+	response.setContent(List.of(linkage));
+
+	when(responseSpec.bodyToMono(SystemLinkagesResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertCustomerId(
+					LEGACY_CUSTOMER_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectNext(MODERN_CUSTOMER_ID)
+			.verifyComplete();
+}
+
+@Test
+void testConvertCustomerId_ModernToLegacy_Success() {
+	SystemLinkage linkage = new SystemLinkage();
+	linkage.setSystemCustomerId(LEGACY_CUSTOMER_ID);
+
+	SystemLinkagesResponse response = new SystemLinkagesResponse();
+	response.setContent(List.of(linkage));
+
+	when(responseSpec.bodyToMono(SystemLinkagesResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertCustomerId(
+					MODERN_CUSTOMER_ID, SyncType.MODERN_TO_LEGACY, CORRELATION_ID))
+			.expectNext(LEGACY_CUSTOMER_ID)
+			.verifyComplete();
+}
+
+@Test
+void testConvertCustomerId_WhenNullResponse_ThrowsException() {
+	SystemLinkagesResponse response = new SystemLinkagesResponse();
+	response.setContent(null);
+
+	when(responseSpec.bodyToMono(SystemLinkagesResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertCustomerId(
+					LEGACY_CUSTOMER_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testConvertCustomerId_WhenEmptyContent_ThrowsException() {
+	SystemLinkagesResponse response = new SystemLinkagesResponse();
+	response.setContent(List.of());
+
+	when(responseSpec.bodyToMono(SystemLinkagesResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertCustomerId(
+					LEGACY_CUSTOMER_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testConvertCustomerId_WhenApiCallFails_PropagatesError() {
+	when(responseSpec.bodyToMono(SystemLinkagesResponse.class))
+			.thenReturn(Mono.error(new RuntimeException("CIAM API down")));
+
+	StepVerifier.create(
+			externalCallService.convertCustomerId(
+					LEGACY_CUSTOMER_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(RuntimeException.class)
+			.verify();
+}
+
+// ==================== convertAgentId ====================
+
+@Test
+void testConvertAgentId_LegacyToModern_Success() {
+	UserResponse user = new UserResponse();
+	user.setUniqueIdentifier(MODERN_AGENT_UUID);
+
+	PageUserResponse response = new PageUserResponse();
+	response.setContent(List.of(user));
+
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					LEGACY_AGENT_CAS_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectNext(MODERN_AGENT_UUID)
+			.verifyComplete();
+}
+
+@Test
+void testConvertAgentId_ModernToLegacy_Success() {
+	UserResponseMetaData metaData = new UserResponseMetaData();
+	metaData.setCasId(LEGACY_AGENT_CAS_ID);
+
+	UserResponse user = new UserResponse();
+	user.setMetaData(metaData);
+
+	PageUserResponse response = new PageUserResponse();
+	response.setContent(List.of(user));
+
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					MODERN_AGENT_UUID, SyncType.MODERN_TO_LEGACY, CORRELATION_ID))
+			.expectNext(LEGACY_AGENT_CAS_ID)
+			.verifyComplete();
+}
+
+@Test
+void testConvertAgentId_WhenNullResponse_ThrowsException() {
+	PageUserResponse response = new PageUserResponse();
+	response.setContent(null);
+
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					LEGACY_AGENT_CAS_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testConvertAgentId_WhenEmptyContent_ThrowsException() {
+	PageUserResponse response = new PageUserResponse();
+	response.setContent(List.of());
+
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					LEGACY_AGENT_CAS_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+
+@Test
+void testConvertAgentId_WhenApiCallFails_PropagatesError() {
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.error(new RuntimeException("Agent service down")));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					LEGACY_AGENT_CAS_ID, SyncType.LEGACY_TO_MODERN, CORRELATION_ID))
+			.expectError(RuntimeException.class)
+			.verify();
+}
+
+@Test
+void testConvertAgentId_WhenModernToLegacy_NoMetaData_ThrowsException() {
+	UserResponse user = new UserResponse();
+	user.setMetaData(null);
+
+	PageUserResponse response = new PageUserResponse();
+	response.setContent(List.of(user));
+
+	when(responseSpec.bodyToMono(PageUserResponse.class))
+			.thenReturn(Mono.just(response));
+
+	StepVerifier.create(
+			externalCallService.convertAgentId(
+					MODERN_AGENT_UUID, SyncType.MODERN_TO_LEGACY, CORRELATION_ID))
+			.expectError(AutoPaySynchException.class)
+			.verify();
+}
+```
+
+}
