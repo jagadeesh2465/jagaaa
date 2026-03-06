@@ -1,0 +1,4634 @@
+This my AutoPaySyncClientHandler
+
+package com.creditone.ucrm.autopaysynch.clienthandler;
+
+import java.util.Map;
+import java.util.function.Function;
+
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+ * Client handler component responsible for making HTTP GET requests to external services. This
+ * class provides a centralized way to handle web client operations with proper error handling,
+ * header management, and query parameter processing for autopay synchronization operations.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AutoPaySyncClientHandler {
+
+	private final WebClient autoPayWebClient;
+
+	/**
+	 * Executes an HTTP GET request to the specified URL with optional headers and query parameters.
+	 * This method constructs the complete request URL, applies headers, and configures error handling
+	 * for the web client call.
+	 *
+	 * @param url
+	 * @param headers
+	 * @param targetApplication
+	 * @param params
+	 * @return
+	 */
+	public WebClient.ResponseSpec get(String url, Map<String, String> headers, String targetApplication, MultiValueMap<String, String> params) {
+		String finalUrl = url;
+		if (params != null && !params.isEmpty()) {
+			finalUrl = UriComponentsBuilder.fromUriString(url).queryParams(params).build().toString();
+		}
+
+		var requestHeaderSpec = autoPayWebClient.get().uri(finalUrl);
+
+		String correlationId = "";
+		if (!CollectionUtils.isEmpty(headers)) {
+			correlationId = (String) headers.get(AutoPaySynchConstant.CORRELATION_ID);
+			for (Map.Entry<String, String> headerEntry : headers.entrySet()) {
+				requestHeaderSpec.header(headerEntry.getKey(), headerEntry.getValue());
+			}
+		}
+
+		return requestHeaderSpec.accept(MediaType.APPLICATION_JSON).retrieve().onStatus(HttpStatusCode::isError, errorResponseMappingFunction(targetApplication, correlationId));
+	}
+
+	/**
+	 * Creates a function that handles HTTP error responses by mapping them to custom exceptions. This
+	 * method provides standardized error handling across all web client calls by extracting error
+	 * response bodies and converting them into meaningful exception messages.
+	 *
+	 * @param targetApplication
+	 * @param correlationId
+	 * @return
+	 */
+	private Function<ClientResponse, Mono<? extends Throwable>> errorResponseMappingFunction(String targetApplication, String correlationId) {
+		return errorResponse -> errorResponse.createException().doOnNext(ex -> log.error(AutoPaySynchConstant.LOG_PREFIX
+				+ "External service call failed [app={}, status={}, url={}]: {}", correlationId, targetApplication, ex.getStatusCode().value(), ex.getRequest() != null
+						? ex.getRequest().getURI()
+						: "N/A", ex.getResponseBodyAsString())).flatMap(ex -> Mono.error(new AutoPaySynchException("External service call failed for targetApp: "
+								+ targetApplication + " with status: " + ex.getStatusCode().value() + " and response: " + ex.getResponseBodyAsString(), correlationId, ex)));
+	}
+}
+
+
+
+
+
+
+
+
+
+These are my config files
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import lombok.Data;
+
+/**
+ * Configuration properties for AgentMappingProcessor Hazelcast map settings.
+ * Binds to the 'agent-mapping' prefix in application properties.
+ *
+ * Example config:
+ * agent-mapping.legacy-to-modern.map-name=AUTOPAY_AGENT_LTM_MAP
+ * agent-mapping.legacy-to-modern.key-name=modernAgentId
+ * agent-mapping.modern-to-legacy.map-name=AUTOPAY_AGENT_MTL_MAP
+ * agent-mapping.modern-to-legacy.key-name=legacyAgentId
+ */
+@Data
+@ConfigurationProperties(prefix = "agent-mapping")
+public class AgentMappingPropertiesConfig {
+
+    private MapConfig legacyToModern;
+    private MapConfig modernToLegacy;
+
+    @Data
+    public static class MapConfig {
+        /** The Hazelcast IMap name to look up */
+        private String mapName;
+        /** The field name inside the GenericRecord to extract the ID from */
+        private String keyName;
+    }
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.time.Duration;
+
+import jakarta.annotation.PreDestroy;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.r2dbc.core.DefaultReactiveDataAccessStrategy;
+import org.springframework.data.r2dbc.core.R2dbcEntityOperations;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.data.r2dbc.dialect.PostgresDialect;
+import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
+import org.springframework.r2dbc.connection.R2dbcTransactionManager;
+import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.ReactiveTransactionManager;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
+import io.r2dbc.spi.ConnectionFactories;
+import io.r2dbc.spi.ConnectionFactory;
+import io.r2dbc.spi.ConnectionFactoryOptions;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import static io.r2dbc.spi.ConnectionFactoryOptions.DATABASE;
+import static io.r2dbc.spi.ConnectionFactoryOptions.DRIVER;
+import static io.r2dbc.spi.ConnectionFactoryOptions.HOST;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PASSWORD;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PORT;
+import static io.r2dbc.spi.ConnectionFactoryOptions.USER;
+
+@Slf4j
+@Configuration
+@RefreshScope
+@EnableConfigurationProperties(AutoPayDBConfig.DatabaseConfig.class)
+@EnableR2dbcRepositories(entityOperationsRef = "autopayEntityTemplate", basePackages = "${database.autopay.repository-base-package}")
+@RequiredArgsConstructor
+public class AutoPayDBConfig {
+
+	private final DatabaseConfig databaseConfig;
+	private ConnectionPool connectionPool;
+
+	@Data
+	@ConfigurationProperties("database.autopay")
+	public static class DatabaseConfig {
+		private String host;
+		private Integer port;
+		private String username;
+		private String password;
+		private String databaseName;
+		private Integer initialPoolSize;
+		private Integer maxPoolSize;
+		private Integer maxIdleTime;
+		private String repositoryBasePackage;
+		private Integer maxAcquireTime;
+		private Integer maxCreateConnectionTime;
+		private Integer maxLifeTime;
+		private Integer acquireRetry;
+	}
+
+	@Bean
+	@Qualifier(value = "autopayConnectionFactory")
+	public ConnectionFactory autopayConnectionFactory() {
+		log.info("Initializing AutoPay database connection factory for host: {}, database: {}", databaseConfig.getHost(), databaseConfig.getDatabaseName());
+
+		try {
+			ConnectionFactoryOptions options = ConnectionFactoryOptions.builder().option(DRIVER, "postgresql").option(HOST, databaseConfig.getHost()).option(PORT, databaseConfig
+					.getPort()).option(DATABASE, databaseConfig.getDatabaseName()).option(USER, databaseConfig.getUsername()).option(PASSWORD, databaseConfig.getPassword())
+					.build();
+			ConnectionFactory connectionFactory = ConnectionFactories.get(options);
+			ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder(connectionFactory).initialSize(databaseConfig.getInitialPoolSize()).maxSize(
+					databaseConfig.getMaxPoolSize()).maxIdleTime(Duration.ofMinutes(databaseConfig.getMaxIdleTime())).maxAcquireTime(Duration.ofSeconds(databaseConfig
+							.getMaxAcquireTime())).maxCreateConnectionTime(Duration.ofSeconds(databaseConfig.getMaxCreateConnectionTime())).maxLifeTime(Duration.ofMinutes(
+									databaseConfig.getMaxLifeTime())).acquireRetry(databaseConfig.getAcquireRetry()).validationQuery("SELECT 1").build();
+			connectionPool = new ConnectionPool(poolConfiguration);
+
+			log.info("AutoPay database connection pool initialized successfully");
+
+			return connectionPool;
+		} catch (Exception e) {
+			log.error("Failed to initialize AutoPay database connection factory Error: {} Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+			throw new IllegalStateException("Database connection initialization failed", e);
+		}
+	}
+
+	@Bean
+	public R2dbcEntityOperations autopayEntityTemplate(@Qualifier("autopayConnectionFactory") ConnectionFactory connectionFactory) {
+		log.info("Creating AutoPay R2DBC entity template");
+		DefaultReactiveDataAccessStrategy strategy = new DefaultReactiveDataAccessStrategy(PostgresDialect.INSTANCE);
+		DatabaseClient databaseClient = DatabaseClient.builder().connectionFactory(connectionFactory).bindMarkers(PostgresDialect.INSTANCE.getBindMarkersFactory()).build();
+		return new R2dbcEntityTemplate(databaseClient, strategy);
+	}
+
+	@Bean
+	@Qualifier("autopayTransactionManager")
+	public ReactiveTransactionManager autopayTransactionManager(@Qualifier("autopayConnectionFactory") ConnectionFactory connectionFactory) {
+
+		log.info("Creating AutoPay transaction manager");
+		return new R2dbcTransactionManager(connectionFactory);
+	}
+
+	/** Graceful shutdown of connection pool */
+	@PreDestroy
+	public void cleanup() {
+		log.info("Shutting down AutoPay database connection pool");
+		try {
+			if (connectionPool != null && !connectionPool.isDisposed()) {
+				connectionPool.dispose();
+				log.info("AutoPay database connection pool disposed successfully");
+			}
+		} catch (Exception e) {
+			log.error("Error during AutoPay database connection pool cleanup Error: {}, Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+		}
+	}
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.time.Duration;
+
+import jakarta.annotation.PreDestroy;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.r2dbc.core.DefaultReactiveDataAccessStrategy;
+import org.springframework.data.r2dbc.core.R2dbcEntityOperations;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.data.r2dbc.dialect.PostgresDialect;
+import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
+import org.springframework.r2dbc.connection.R2dbcTransactionManager;
+import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.ReactiveTransactionManager;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
+import io.r2dbc.spi.ConnectionFactories;
+import io.r2dbc.spi.ConnectionFactory;
+import io.r2dbc.spi.ConnectionFactoryOptions;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import static io.r2dbc.spi.ConnectionFactoryOptions.DATABASE;
+import static io.r2dbc.spi.ConnectionFactoryOptions.DRIVER;
+import static io.r2dbc.spi.ConnectionFactoryOptions.HOST;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PASSWORD;
+import static io.r2dbc.spi.ConnectionFactoryOptions.PORT;
+import static io.r2dbc.spi.ConnectionFactoryOptions.USER;
+
+@Slf4j
+@Configuration
+@RefreshScope
+@EnableConfigurationProperties(AutoPaySynchDBConfig.DatabaseConfig.class)
+@EnableR2dbcRepositories(entityOperationsRef = "autopaySynchEntityTemplate", basePackages = "${database.autopaysync.repository-base-package}")
+@RequiredArgsConstructor
+public class AutoPaySynchDBConfig {
+
+	private final DatabaseConfig databaseConfig;
+	private ConnectionPool connectionPool;
+
+	@Data
+	@ConfigurationProperties("database.autopaysync")
+	public static class DatabaseConfig {
+		private String host;
+		private Integer port;
+		private String username;
+		private String password;
+		private String databaseName;
+		private Integer initialPoolSize;
+		private Integer maxPoolSize;
+		private Integer maxIdleTime;
+		private String repositoryBasePackage;
+		private Integer maxAcquireTime;
+		private Integer maxCreateConnectionTime;
+		private Integer maxLifeTime;
+		private Integer acquireRetry;
+	}
+
+	@Bean
+	@Qualifier(value = "autopaySynchConnectionFactory")
+	public ConnectionFactory autopaySynchConnectionFactory() {
+		log.info("Initializing AutoPaySync database connection factory for host: {}, database: {}", databaseConfig.getHost(), databaseConfig.getDatabaseName());
+
+		try {
+			ConnectionFactoryOptions options = ConnectionFactoryOptions.builder().option(DRIVER, "postgresql").option(HOST, databaseConfig.getHost()).option(PORT, databaseConfig
+					.getPort()).option(DATABASE, databaseConfig.getDatabaseName()).option(USER, databaseConfig.getUsername()).option(PASSWORD, databaseConfig.getPassword())
+					.build();
+			ConnectionFactory connectionFactory = ConnectionFactories.get(options);
+			ConnectionPoolConfiguration poolConfiguration = ConnectionPoolConfiguration.builder(connectionFactory).initialSize(databaseConfig.getInitialPoolSize()).maxSize(
+					databaseConfig.getMaxPoolSize()).maxIdleTime(Duration.ofMinutes(databaseConfig.getMaxIdleTime())).maxAcquireTime(Duration.ofSeconds(databaseConfig
+							.getMaxAcquireTime())).maxCreateConnectionTime(Duration.ofSeconds(databaseConfig.getMaxCreateConnectionTime())).maxLifeTime(Duration.ofMinutes(
+									databaseConfig.getMaxLifeTime())).acquireRetry(databaseConfig.getAcquireRetry()).validationQuery("SELECT 1").build();
+			connectionPool = new ConnectionPool(poolConfiguration);
+
+			log.info("AutoPaySync database connection pool initialized successfully");
+
+			return connectionPool;
+		} catch (Exception e) {
+			log.error("Failed to initialize AutoPaySync database connection factory Error: {} Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n",
+					" "));
+			throw new IllegalStateException("Database connection initialization failed", e);
+		}
+	}
+
+	@Bean
+	public R2dbcEntityOperations autopaySynchEntityTemplate(@Qualifier("autopaySynchConnectionFactory") ConnectionFactory connectionFactory) {
+		log.info("Creating AutoPaySync R2DBC entity template");
+		DefaultReactiveDataAccessStrategy strategy = new DefaultReactiveDataAccessStrategy(PostgresDialect.INSTANCE);
+		DatabaseClient databaseClient = DatabaseClient.builder().connectionFactory(connectionFactory).bindMarkers(PostgresDialect.INSTANCE.getBindMarkersFactory()).build();
+		return new R2dbcEntityTemplate(databaseClient, strategy);
+	}
+
+	@Bean
+	@Qualifier("autopaySynchTransactionManager")
+	public ReactiveTransactionManager autopaySynchTransactionManager(@Qualifier("autopaySynchConnectionFactory") ConnectionFactory connectionFactory) {
+
+		log.info("Creating AutoPaySync transaction manager");
+		return new R2dbcTransactionManager(connectionFactory);
+	}
+
+	/** Graceful shutdown of connection pool */
+	@PreDestroy
+	public void cleanup() {
+		log.info("Shutting down AutoPaySync database connection pool");
+		try {
+			if (connectionPool != null && !connectionPool.isDisposed()) {
+				connectionPool.dispose();
+				log.info("AutoPaySync database connection pool disposed successfully");
+			}
+		} catch (Exception e) {
+			log.error("Error during AutoPaySync database connection pool cleanup Error: {}, Cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+		}
+	}
+
+}
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import lombok.Data;
+
+/**
+ * Configuration properties for CustomerMappingProcessor Hazelcast map settings.
+ * Binds to the 'customer-mapping' prefix in application properties.
+ *
+ * Example config:
+ * customer-mapping.legacy-to-modern.map-name=AUTOPAY_CUSTOMER_LTM_MAP
+ * customer-mapping.legacy-to-modern.key-name=modernCustomerId
+ * customer-mapping.modern-to-legacy.map-name=AUTOPAY_CUSTOMER_MTL_MAP
+ * customer-mapping.modern-to-legacy.key-name=legacyCustomerId
+ */
+@Data
+@ConfigurationProperties(prefix = "customer-mapping")
+public class CustomerMappingPropertiesConfig {
+
+    private MapConfig legacyToModern;
+    private MapConfig modernToLegacy;
+
+    @Data
+    public static class MapConfig {
+        /** The Hazelcast IMap name to look up */
+        private String mapName;
+        /** The field name inside the GenericRecord to extract the ID from */
+        private String keyName;
+    }
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+import java.util.Properties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import com.hazelcast.client.HazelcastClient;
+import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.client.impl.connection.tcp.RoutingMode;
+import com.hazelcast.config.SSLConfig;
+import com.hazelcast.core.HazelcastInstance;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+/** Configuration class for Hazelcast client setup in the autopay synchronization service. */
+@Slf4j
+@Configuration
+@RequiredArgsConstructor
+@EnableConfigurationProperties(HazelcastConfiguration.HazelcastConfigProperties.class)
+public class HazelcastConfiguration {
+
+    private final HazelcastConfigProperties properties;
+    /** Configuration properties for Hazelcast client connection settings. */
+    @Data
+    @ConfigurationProperties(prefix = "hazelcast")
+    public static class HazelcastConfigProperties {
+        private String clusterName;
+        private String address;
+        private String trustStorePath;
+        private String trustStorePassword;
+        private String username;
+        private String password;
+        private Boolean enabled;
+    }
+    /**
+     * Creates and configures a Hazelcast client instance as a Spring bean.
+     *
+     * @return HazelcastInstance
+     */
+    @Bean
+    @ConditionalOnProperty(name = "hazelcast.enabled", havingValue = "true", matchIfMissing = true)
+    public HazelcastInstance hazelcastInstance() {
+        if (!properties.getEnabled()) {
+            log.info("Hazelcast is disabled via configuration");
+            return null;
+        }
+        log.info("Configuring Hazelcast client instance...");
+        try {
+            ClientConfig clientConfig = buildClientConfig();
+            HazelcastInstance instance = HazelcastClient.newHazelcastClient(clientConfig);
+            log.info("Hazelcast client instance configured successfully.");
+            return instance;
+        } catch (Exception e) {
+            log.warn("Error instantiating Hazelcast, error: {} cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+        }
+        return null;
+    }
+    /**
+     * Builds the Hazelcast client configuration with security and network settings.
+     *
+     * @return ClientConfig
+     */
+    private ClientConfig buildClientConfig() {
+        ClientConfig clientConfig = new ClientConfig();
+        clientConfig.setClusterName(properties.getClusterName());
+        // Network configuration
+        clientConfig.getNetworkConfig().addAddress(properties.getAddress()).getClusterRoutingConfig().setRoutingMode(RoutingMode.ALL_MEMBERS);
+        // SSL configuration
+        log.info("Setting up hazelcast SSL configuration.");
+        Properties sslProps = new Properties();
+        sslProps.setProperty("trustStore", properties.getTrustStorePath());
+        sslProps.setProperty("trustStorePassword", properties.getTrustStorePassword());
+        clientConfig.getNetworkConfig().setSSLConfig(new SSLConfig().setEnabled(true).setProperties(sslProps));
+        // Security configuration
+        log.info("Setting up hazelcast security credentials.");
+        clientConfig.getSecurityConfig().setUsernamePasswordIdentityConfig(properties.getUsername(), properties.getPassword());
+        return clientConfig;
+    }
+
+}
+
+
+package com.creditone.ucrm.autopaysynch.config;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.stereotype.Component;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import com.hazelcast.core.HazelcastInstance;
+import lombok.extern.slf4j.Slf4j;
+@Slf4j
+@Component
+public class HazelcastHealthIndicator implements HealthIndicator {
+    private final Optional<HazelcastInstance> hazelcastInstance;
+    public HazelcastHealthIndicator(@Autowired(required = false) HazelcastInstance hazelcastInstance) {
+        this.hazelcastInstance = Optional.ofNullable(hazelcastInstance);
+        log.info("HazelcastHealthIndicator initialized with instance present: {}", this.hazelcastInstance.isPresent());
+    }
+    @Override
+    public Health health() {
+        try {
+            if (hazelcastInstance.isEmpty()) {
+                log.warn("Hazelcast instance not available - reporting UNKNOWN status");
+                return Health.unknown().withDetail("status", "Hazelcast not configured or disabled").withDetail("reason", "No HazelcastInstance bean found").build();
+            }
+            HazelcastInstance instance = hazelcastInstance.get();
+            // Check if Hazelcast is running
+            if (instance.getLifecycleService().isRunning()) {
+                log.debug("Hazelcast instance is running - reporting UP status");
+                return Health.up().withDetail("name", instance.getName()).withDetail("memberCount", instance.getCluster().getMembers().size()).withDetail("status", "Running")
+                        .build();
+            } else {
+                log.warn("Hazelcast instance exists but is not running - reporting DOWN status");
+                return Health.down().withDetail("name", instance.getName()).withDetail("status", "Not running").withDetail("reason",
+                        "Lifecycle service indicates instance is not running").build();
+            }
+        } catch (Exception e) {
+            log.error("Error checking Hazelcast health: {} cause: {}", e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+            return Health.down().withException(e).withDetail("error", e.getMessage()).withDetail("status", "Health check failed").build();
+        }
+    }
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.reactive.ReactiveKafkaConsumerTemplate;
+import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.config.SaslConfigs;
+import org.apache.kafka.common.config.SslConfigs;
+import org.apache.kafka.common.serialization.StringDeserializer;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.kafka.receiver.ReceiverOptions;
+
+/**
+ * Configuration class responsible for setting up reactive Kafka consumer templates for both Modern
+ * (MSK) and Legacy (OnPrem) autopay synchronization systems.
+ */
+@Slf4j
+@Configuration
+@RefreshScope
+@RequiredArgsConstructor
+public class KafkaConsumerConfiguration {
+
+	private final KafkaPropertiesConfig properties;
+
+	/**
+	 * Creates a reactive Kafka consumer template specifically configured for Legacy OnPrem
+	 * environment. This template handles autopay events from the on-premises Kafka infrastructure
+	 * with legacy-specific SSL truststore and authentication settings.
+	 *
+	 * @return
+	 */
+	@Bean(name = "reactiveKafkaLegacyToModernConsumerTemplate")
+	public ReactiveKafkaConsumerTemplate<String, String> reactiveKafkaLegacyToModernConsumerTemplate() {
+		log.info("Creating Legacy To Modern Kafka consumer template");
+
+		validateConfiguration(properties.getConsumer().getLegacyToModern(), properties.getSsl().getLegacy());
+
+		Map<String, Object> consumerProps = buildLegacyConsumerProperties();
+		ReceiverOptions<String, String> receiverOptions = createReceiverOptions(consumerProps, properties.getConsumer().getLegacyToModern().getTopic());
+
+		log.info("Legacy To Modern Kafka consumer template created for topic: {}", properties.getConsumer().getLegacyToModern().getTopic());
+
+		return new ReactiveKafkaConsumerTemplate<>(receiverOptions);
+	}
+
+	/**
+	 * Creates a reactive Kafka consumer template specifically configured for Modern MSK environment.
+	 * This template handles autopay events from the cloud-based Kafka infrastructure with
+	 * MSK-specific SSL truststore and authentication settings.
+	 *
+	 * @return
+	 */
+	//	@Bean(name = "reactiveKafkaModernToLegacyConsumerTemplate")
+	//	public ReactiveKafkaConsumerTemplate<String, String> reactiveKafkaModernToLegacyConsumerTemplate() {
+	//		log.info("Creating Modern Kafka consumer template");
+	//
+	//		validateConfiguration(properties.getConsumer().getModern(), properties.getSsl().getModern());
+	//
+	//		Map<String, Object> consumerProps = buildModernConsumerProperties();
+	//		ReceiverOptions<String, String> receiverOptions = createReceiverOptions(consumerProps, properties.getConsumer().getModern().getTopic());
+	//
+	//		log.info("Modern To Legacy Kafka consumer template created for topic: {}", properties.getConsumer().getModern().getTopic());
+	//
+	//		return new ReactiveKafkaConsumerTemplate<>(receiverOptions);
+	//	}
+
+	/**
+	 * Builds Kafka consumer properties specific to the Legacy OnPrem environment. Combines base
+	 * consumer properties with Legacy-specific configurations including OnPrem bootstrap servers, SSL
+	 * truststore settings, and SASL authentication.
+	 *
+	 * @return
+	 */
+	private Map<String, Object> buildLegacyConsumerProperties() {
+		KafkaPropertiesConfig.Consumer.LegacyToModern legacy = properties.getConsumer().getLegacyToModern();
+		KafkaPropertiesConfig.Ssl.Legacy sslLegacy = properties.getSsl().getLegacy();
+
+		Map<String, Object> props = buildBaseConsumerProperties();
+
+		// Legacy-specific properties
+		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, legacy.getBootstrapAddress());
+		props.put(ConsumerConfig.GROUP_ID_CONFIG, legacy.getGroupId());
+
+		// Legacy SSL properties
+		props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, sslLegacy.getNonMskTruststoreLocation());
+		props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, sslLegacy.getNonMskTruststorePassword());
+		addCommonSslProperties(props, sslLegacy.getEndpointIdentificationAlgorithm(), sslLegacy.getSaslMechanism());
+
+		// Legacy SASL properties
+		addSaslJaasConfig(props, sslLegacy.getSaslJaasLoginModule(), legacy.getSaslUsername(), legacy.getSaslPassword());
+
+		return props;
+	}
+
+	/**
+	 * Builds Kafka consumer properties specific to the Modern MSK environment. Combines base consumer
+	 * properties with Modern-specific configurations including MSK bootstrap servers, SSL truststore
+	 * settings, and SASL authentication.
+	 *
+	 * @return
+	 */
+	//	private Map<String, Object> buildModernConsumerProperties() {
+	//		KafkaPropertiesConfig.Consumer.Modern modern = properties.getConsumer().getModern();
+	//		KafkaPropertiesConfig.Ssl.Modern sslModern = properties.getSsl().getModern();
+	//
+	//		Map<String, Object> props = buildBaseConsumerProperties();
+	//
+	//		// Modern-specific properties
+	//		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, modern.getBootstrapAddress());
+	//		props.put(ConsumerConfig.GROUP_ID_CONFIG, modern.getGroupId());
+	//
+	//		// Modern SSL properties
+	//		props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, sslModern.getMskTruststoreLocation());
+	//		props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, sslModern.getMskTruststorePassword());
+	//		addCommonSslProperties(props, sslModern.getEndpointIdentificationAlgorithm(), sslModern.getSaslMechanism());
+	//
+	//		// Modern SASL properties
+	//		addSaslJaasConfig(props, sslModern.getSaslJaasLoginModule(), modern.getSaslUsername(), modern.getSaslPassword());
+	//
+	//		return props;
+	//	}
+
+	/**
+	 * Adds common SSL configuration properties that are shared between Modern and Legacy consumers.
+	 * These properties configure SSL endpoint identification and SASL mechanism for secure
+	 * communication with Kafka brokers.
+	 *
+	 * @param props
+	 * @param endpointAlgorithm
+	 * @param saslMechanism
+	 */
+	private void addCommonSslProperties(Map<String, Object> props, String endpointAlgorithm, String saslMechanism) {
+		props.put(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG, endpointAlgorithm);
+		props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
+	}
+
+	/**
+	 * Constructs and adds SASL JAAS configuration for username/password authentication. This method
+	 * builds the JAAS configuration string required for SASL authentication with Kafka brokers using
+	 * the specified login module and credentials.
+	 *
+	 * @param props
+	 * @param loginModule
+	 * @param username
+	 * @param password
+	 */
+	private void addSaslJaasConfig(Map<String, Object> props, String loginModule, String username, String password) {
+		if (StringUtils.hasText(loginModule) && StringUtils.hasText(username) && StringUtils.hasText(password)) {
+			String jaasConfig = "%s required username=\"%s\" password=\"%s\";".formatted(loginModule, username, password);
+			props.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
+		}
+	}
+
+	/**
+	 * Creates ReceiverOptions for reactive Kafka consumption with optimized settings. This method
+	 * configures the reactive consumer with topic subscription, commit strategies, and retry behavior
+	 * for reliable message processing.
+	 *
+	 * @param <T>
+	 * @param props
+	 * @param topic
+	 * @return
+	 */
+	private <T> ReceiverOptions<String, T> createReceiverOptions(Map<String, Object> props, String topic) {
+		KafkaPropertiesConfig.Consumer.Common common = properties.getConsumer().getCommon();
+		ReceiverOptions<String, T> receiverOptions = ReceiverOptions.create(props);
+		return receiverOptions.subscription(Collections.singletonList(topic)).commitInterval(Duration.ofSeconds(common.getCommitIntervalSeconds())).commitBatchSize(common
+				.getCommitBatchSize()).maxCommitAttempts(common.getRetryAttempts());
+	}
+
+	/**
+	 * Builds the foundation consumer properties shared by both Modern and Legacy consumers. These
+	 * properties define core Kafka consumer behavior including deserialization, performance tuning,
+	 * session management, and security protocol settings.
+	 *
+	 * @return
+	 */
+	private Map<String, Object> buildBaseConsumerProperties() {
+		Map<String, Object> props = new HashMap<>();
+		KafkaPropertiesConfig.Consumer.Common common = properties.getConsumer().getCommon();
+
+		// Basic consumer configuration
+		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
+		props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, StringDeserializer.class);
+		props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+
+		// Concurrency and performance configurations
+		props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, common.getConcurrencyMaxPollRecords());
+		props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, common.getConcurrencyFetchMinBytes());
+		props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, common.getConcurrencyFetchMaxWaitMs());
+		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, common.getConcurrencyMaxPollIntervalMs());
+
+		// Session and heartbeat configurations
+		props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, common.getSessionTimeoutMs());
+		props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, common.getHeartbeatIntervalMs());
+
+		// Common properties
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, common.getAutoOffsetReset());
+		props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, common.getSecurityProtocol());
+
+		return props;
+	}
+
+	/**
+	 * Validates that required consumer and SSL configuration objects are not null and contain
+	 * necessary properties for successful Kafka connection.
+	 *
+	 * @param consumerConfig
+	 * @param sslConfig
+	 */
+	private void validateConfiguration(Object consumerConfig, Object sslConfig) {
+		Assert.notNull(consumerConfig, "Consumer configuration cannot be null");
+		Assert.notNull(sslConfig, "SSL configuration cannot be null");
+
+		//		if (consumerConfig instanceof KafkaPropertiesConfig.Consumer.Modern modern) {
+		//			validateModernConfig(modern);
+		//		} else
+		if (consumerConfig instanceof KafkaPropertiesConfig.Consumer.LegacyToModern legacy) {
+			validateLegacyConfig(legacy);
+		}
+	}
+
+	/**
+	 * Validates Modern consumer configuration properties to ensure all required settings are present
+	 * for MSK connectivity.
+	 *
+	 * @param modern
+	 */
+	//	private void validateModernConfig(KafkaPropertiesConfig.Consumer.Modern modern) {
+	//		Assert.hasText(modern.getBootstrapAddress(), "Modern bootstrap address cannot be empty");
+	//		Assert.hasText(modern.getGroupId(), "Modern group ID cannot be empty");
+	//		Assert.hasText(modern.getTopic(), "Modern topic cannot be empty");
+	//	}
+
+	/**
+	 * Validates Legacy consumer configuration properties to ensure all required settings are present
+	 * for OnPrem Kafka connectivity.
+	 *
+	 * @param legacy
+	 */
+	private void validateLegacyConfig(KafkaPropertiesConfig.Consumer.LegacyToModern legacy) {
+		Assert.hasText(legacy.getBootstrapAddress(), "Legacy bootstrap address cannot be empty");
+		Assert.hasText(legacy.getGroupId(), "Legacy group ID cannot be empty");
+		Assert.hasText(legacy.getTopic(), "Legacy topic cannot be empty");
+	}
+
+}
+
+
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.util.List;
+
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.kafka.consumer.AbstractKafkaConsumer;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.log;
+
+@Slf4j
+@Component
+@EnableScheduling
+@RequiredArgsConstructor
+public class KafkaConsumerMonitorConfig {
+
+	private final List<AbstractKafkaConsumer<?>> kafkaConsumers;
+
+	@Scheduled(fixedDelayString = "${kafka.consumer.monitor.fixed-delay-ms:360000}", initialDelayString = "${kafka.consumer.monitor.initial-delay-ms:360000}")
+	public void checkAndRestartConsumers() {
+		log.info("Checking Kafka consumer health...");
+
+		kafkaConsumers.forEach(consumer -> {
+			if (!consumer.isConsumerActive()) {
+				log.warn("{} Consumer is DOWN for topic {}. Restarting...", consumer.getEventType(), consumer.getTopic());
+				try {
+					consumer.startConsuming();
+					log.info("{} Consumer restarted successfully for topic {}", consumer.getEventType(), consumer.getTopic());
+				} catch (Exception e) {
+					log.error("Failed to restart {} consumer for topic {}: {}", consumer.getEventType(), consumer.getTopic(), e.getMessage(), e);
+				}
+			} else {
+				log.info("{} Consumer is running fine for topic {}", consumer.getEventType(), consumer.getTopic());
+			}
+		});
+	}
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Configuration;
+
+import lombok.Data;
+
+@Data
+@Configuration
+@ConfigurationProperties(prefix = "kafka")
+@RefreshScope
+public class KafkaPropertiesConfig {
+	//	private Producer producer;
+	private Consumer consumer;
+	private Ssl ssl;
+
+	//	@Data
+	//	public static class Producer {
+	//
+	//		private LegacyToModern legacyToModern;
+	//		private ModernToLegacy modernToLegacy;
+	//		private Common common;
+	//
+	//		@Data
+	//		public static class Common {
+	//			private int deliveryTimeoutMs;
+	//			private String compressionTypeConfig;
+	//			private int batchSizeConfig;
+	//			private int lingerMsConfig;
+	//			private int bufferMemoryConfig;
+	//			private int maxBlockMs;
+	//			private int requestTimeoutMs;
+	//			private int retriesConfig;
+	//			private int retriesBackoffMsConfig;
+	//			private boolean idempotenceConfig;
+	//			private int maxInflightReqPerConn;
+	//			private String securityProtocol;
+	//		}
+	//
+	//		@Data
+	//		public static class LegacyToModern {
+	//			private String saslUsername;
+	//			private String saslPassword;
+	//			private String bootstrapAddress;
+	//			private String topic;
+	//			private String dlqTopic;
+	//		}
+	//
+	//		@Data
+	//		public static class ModernToLegacy {
+	//			private String saslUsername;
+	//			private String saslPassword;
+	//			private String bootstrapAddress;
+	//			private String topic;
+	//			private String dlqTopic;
+	//		}
+	//
+	//	}
+
+	/***
+	 * Modern Consumer Config
+	 */
+	@Data
+	public static class Consumer {
+
+		private Common common;
+		private LegacyToModern legacyToModern;
+		//		private ModernToLegacy modernToLegacy;
+
+		@Data
+		public static class Common {
+			private String autoOffsetReset;
+			private String securityProtocol;
+
+			private Integer sessionTimeoutMs;
+			private Integer heartbeatIntervalMs;
+			private Integer concurrencyMaxPollRecords;
+			private Integer concurrencyFetchMinBytes;
+			private Integer concurrencyFetchMaxWaitMs;
+			private Integer concurrencyMaxPollIntervalMs;
+			private Integer concurrencyProcessingTimeoutSeconds;
+
+			private Integer retryAttempts;
+			private Long retryBackoffMs;
+			private Double retryJitter;
+			private Long retryMaxDelayMs;
+			private Integer commitIntervalSeconds;
+			private Integer commitBatchSize;
+		}
+
+		//		@Data
+		//		public static class ModernToLegacy {
+		//			private String bootstrapAddress;
+		//			private String groupId;
+		//			private String jsonValueDefaultType;
+		//			private String topic;
+		//			private String saslUsername;
+		//			private String saslPassword;
+		//			private Integer rateLimit;
+		//			private Integer replenish;
+		//			private Integer concurrency;
+		//		}
+
+		@Data
+		public static class LegacyToModern {
+			private String bootstrapAddress;
+			private String topic;
+			private String groupId;
+			private String saslUsername;
+			private String saslPassword;
+			private String jsonValueDefaultType;
+			private Integer rateLimit;
+			private Integer replenish;
+			private Integer concurrency;
+		}
+
+	}
+
+	@Data
+	public static class Ssl {
+		private Legacy legacy;
+		//		private Modern modern;
+
+		@Data
+		public static class Legacy {
+			private String nonMskTruststoreLocation;
+			private String nonMskTruststorePassword;
+			private String endpointIdentificationAlgorithm;
+			private String saslMechanism;
+			private String saslJaasLoginModule;
+		}
+
+		//		@Data
+		//		public static class Modern {
+		//			private String mskTruststoreLocation;
+		//			private String mskTruststorePassword;
+		//			private String endpointIdentificationAlgorithm;
+		//			private String saslMechanism;
+		//			private String saslJaasLoginModule;
+		//		}
+	}
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.UUID;
+
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.kafka.event.LegacyToModernSourceEvent;
+
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+public class SyncContext implements Serializable {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	private LegacyToModernSourceEvent legacyEvent;
+	private AutoPaySynchLinkageResponse linkageResponse;
+	private AutoPaySynchLogResponse logResponse;
+	private UUID individualUniqueIdentifierKey;
+	private UUID agentId;
+	private UUID creditAccountId;
+	private UUID externalAccountId;
+	private String externalBankName;
+	private String externalAccountLast4;
+	private String correlationId;
+}
+
+
+package com.creditone.ucrm.autopaysynch.config;
+
+import java.io.IOException;
+import java.net.ConnectException;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.http.codec.json.Jackson2JsonDecoder;
+import org.springframework.http.codec.json.Jackson2JsonEncoder;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.creditone.ucrm.autopaysynch.exception.ServiceUnavailableException;
+
+import io.netty.channel.ChannelOption;
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
+import reactor.util.retry.Retry;
+
+/**
+ * Configuration class responsible for creating and configuring reactive WebClient instances for
+ * debit payment synchronization HTTP operations.
+ */
+@Slf4j
+@Configuration
+@RefreshScope
+@RequiredArgsConstructor
+@EnableConfigurationProperties(WebClientConfiguration.HttpConfigProperties.class)
+public class WebClientConfiguration {
+
+	private final HttpConfigProperties httpConfig;
+
+	/**
+	 * Configuration properties class that encapsulates all HTTP client settings. These properties are
+	 * externalized to allow environment-specific tuning without code changes.
+	 */
+	@Data
+	@ConfigurationProperties(prefix = "config.http")
+	public static class HttpConfigProperties {
+		private Integer maxConnections;
+		private Integer retryCount;
+		private Integer retryDurationSeconds;
+		private Integer maxInmemorySize;
+		private Integer maxConnectionPool;
+		private Integer maxIdleTimeSeconds;
+		private Integer maxLifeTimeSeconds;
+		private Integer evictInBackgroundSeconds;
+		private Integer connectionTimeoutMillis;
+		private Integer responseTimeoutMillis;
+		private Integer readTimeoutMillis;
+		private Integer writeTimeoutMillis;
+		private Boolean enableMetrics;
+	}
+
+	/**
+	 * Creates a specialized ObjectMapper for payment-related JSON operations. This mapper is
+	 * configured for robust deserialization that can handle varying JSON structures from different
+	 * payment systems.
+	 *
+	 * @return
+	 */
+	@Bean("paymentsObjectMapper")
+	public ObjectMapper paymentsObjectMapper() {
+		return new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL).disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).findAndRegisterModules();
+	}
+
+	/**
+	 * Creates the primary WebClient instance for payment synchronization operations. This client is
+	 * specifically configured for debit payment service interactions with optimized settings for
+	 * reliability and performance.
+	 *
+	 * @param paymentsObjectMapper
+	 * @return
+	 */
+	@Bean("paymentsWebClient")
+	@DependsOn("paymentsObjectMapper")
+	public WebClient paymentsWebClient(ObjectMapper paymentsObjectMapper) {
+		return createWebClient(paymentsObjectMapper, "debit-payments-synch");
+	}
+
+	/**
+	 * Factory method that creates a fully configured WebClient instance with enterprise-grade
+	 * settings for production use.
+	 *
+	 * @param objectMapper
+	 * @param clientName
+	 * @return
+	 */
+	private WebClient createWebClient(ObjectMapper objectMapper, String clientName) {
+		ConnectionProvider provider = createConnectionProvider(clientName);
+		HttpClient httpClient = createHttpClient(provider);
+		ExchangeStrategies exchangeStrategies = createExchangeStrategies(objectMapper);
+
+		return WebClient.builder().clientConnector(new ReactorClientHttpConnector(httpClient)).filter(buildRetryExchangeFilterFunction()).exchangeStrategies(exchangeStrategies)
+				.defaultHeaders(this::setDefaultHeaders).build();
+	}
+
+	/**
+	 * Creates a connection provider with advanced connection pool management. This provider handles
+	 * connection lifecycle, resource optimization, and background maintenance for optimal
+	 * performance.
+	 *
+	 * @param name
+	 * @return
+	 */
+	private ConnectionProvider createConnectionProvider(String name) {
+		ConnectionProvider.Builder builder = ConnectionProvider.builder(name + "-connection-pool").maxConnections(httpConfig.getMaxConnections()).maxIdleTime(Duration.ofSeconds(
+				httpConfig.getMaxIdleTimeSeconds())).maxLifeTime(Duration.ofSeconds(httpConfig.getMaxLifeTimeSeconds())).pendingAcquireMaxCount(httpConfig.getMaxConnectionPool())
+				.evictInBackground(Duration.ofSeconds(httpConfig.getEvictInBackgroundSeconds()));
+
+		if (httpConfig.getEnableMetrics()) {
+			builder.metrics(true);
+		}
+
+		return builder.build();
+	}
+
+	/**
+	 * Creates an HttpClient with comprehensive timeout handling and optional metrics. This client
+	 * provides multiple layers of timeout protection to handle various failure scenarios and network
+	 * conditions.
+	 *
+	 * @param provider
+	 * @return
+	 */
+	private HttpClient createHttpClient(ConnectionProvider provider) {
+		HttpClient httpClient = HttpClient.create(provider).option(ChannelOption.CONNECT_TIMEOUT_MILLIS, httpConfig.getConnectionTimeoutMillis()).responseTimeout(Duration.ofMillis(
+				httpConfig.getResponseTimeoutMillis())).doOnConnected(conn -> conn.addHandlerFirst(new ReadTimeoutHandler(httpConfig.getReadTimeoutMillis(), TimeUnit.MILLISECONDS))
+						.addHandlerLast(new WriteTimeoutHandler(httpConfig.getWriteTimeoutMillis(), TimeUnit.MILLISECONDS)));
+
+		if (httpConfig.getEnableMetrics()) {
+			httpClient = httpClient.metrics(true, Function.identity());
+		}
+
+		return httpClient;
+	}
+
+	/**
+	 * Creates exchange strategies for JSON processing with memory management. These strategies define
+	 * how HTTP request/response bodies are serialized and deserialized, with controls for memory
+	 * usage.
+	 *
+	 * @param objectMapper
+	 * @return
+	 */
+	private ExchangeStrategies createExchangeStrategies(ObjectMapper objectMapper) {
+		return ExchangeStrategies.builder().codecs(configurer -> {
+			configurer.defaultCodecs().maxInMemorySize(httpConfig.getMaxInmemorySize());
+			configurer.defaultCodecs().jackson2JsonDecoder(new Jackson2JsonDecoder(objectMapper, MediaType.APPLICATION_JSON));
+			configurer.defaultCodecs().jackson2JsonEncoder(new Jackson2JsonEncoder(objectMapper, MediaType.APPLICATION_JSON));
+		}).build();
+	}
+
+	/**
+	 * Creates an exchange filter function that implements intelligent retry logic with exponential
+	 * backoff for handling transient failures.
+	 *
+	 * @return
+	 */
+	private ExchangeFilterFunction buildRetryExchangeFilterFunction() {
+		return (request, next) -> next.exchange(request).retryWhen(Retry.backoff(httpConfig.getRetryCount(), Duration.ofSeconds(httpConfig.getRetryDurationSeconds())).filter(
+				this::isRetryableException).doBeforeRetry(retrySignal -> log.warn("Retrying request to {} due to: {} (attempt: {})", request.url(), retrySignal.failure()
+						.getMessage(), retrySignal.totalRetries() + 1)).onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> new ServiceUnavailableException(String.format(
+								"Failed to process request to %s after %d retries. Last error:" + " %s", request.url(), httpConfig.getRetryCount(), retrySignal.failure()
+										.getMessage()), retrySignal.failure())));
+	}
+
+	/**
+	 * Determines whether an exception should trigger a retry attempt.
+	 *
+	 * @param throwable
+	 * @return
+	 */
+	private boolean isRetryableException(Throwable throwable) {
+		return throwable instanceof ConnectException || throwable instanceof IOException || throwable instanceof java.net.SocketTimeoutException
+				|| throwable instanceof java.nio.channels.ClosedChannelException || (throwable instanceof WebClientResponseException wcre && isRetryableStatus(wcre
+						.getStatusCode()));
+	}
+
+	private boolean isRetryableStatus(HttpStatusCode statusCode) {
+		return statusCode.is5xxServerError() || statusCode == HttpStatus.REQUEST_TIMEOUT || statusCode == HttpStatus.TOO_MANY_REQUESTS;
+	}
+
+	private void setDefaultHeaders(HttpHeaders headers) {
+		headers.set(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+		headers.set(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE);
+		headers.set(HttpHeaders.USER_AGENT, "DebitPaymentSyncService/1.0");
+	}
+}
+
+
+This was my constant class
+
+package com.creditone.ucrm.autopaysynch.constant;
+
+public final class AutoPaySynchConstant {
+
+	public static final String AUTOPAY_SYNCH_SERVICE = "AUTOPAY_SYNCH_SERVICE";
+	public static final String LOG_PREFIX = "correlationId: {}. ";
+	public static final String ACTIVE = "ACTIVE";
+	public static final String INACTIVE = "INACTIVE";
+	public static final String CORRELATION_ID = "correlationId";
+	public static final String API_VERSION = "api-version";
+	public static final String REPROCESS_RESPONSE = "process_initiated";
+
+	public enum SyncType {
+		MODERN_TO_LEGACY, LEGACY_TO_MODERN
+	}
+
+	public enum OriginSystem {
+		MODERN, LEGACY
+	}
+
+	public enum SyncStatus {
+		SYNC_SUCCESS, SYNC_FAILED
+	}
+
+	public enum ConsumerHealthStatus {
+		ACTIVE, INACTIVE
+	}
+
+	private AutoPaySynchConstant() {
+	}
+
+}
+
+
+This is my controller class
+
+package com.creditone.ucrm.autopaysynch.controller;
+
+import java.util.List;
+
+import jakarta.validation.Valid;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ConsumerHealthStatusResponse;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ConsumerStatus;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ConsumerStatus.EventTypeEnum;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ConsumerStatus.StatusEnum;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ReprocessByIdRequest;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ReprocessRequest;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ReprocessResponse;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.kafka.consumer.AbstractKafkaConsumer;
+import com.creditone.ucrm.autopaysynch.processor.SyncRetryProcessor;
+
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@RestController
+@RequestMapping(path = "/private/creditcard/financials/autopay")
+@Validated
+@OpenAPIDefinition(info = @Info(title = AutoPaySynchConstant.AUTOPAY_SYNCH_SERVICE, description = "AutoPay Synch Service", version = "1.0.0"), tags = {
+		@Tag(name = "AutoPay Synch Service") })
+@RequiredArgsConstructor
+public class AutoPaySynchController {
+
+	private final List<AbstractKafkaConsumer<?>> kafkaConsumers;
+	private final SyncRetryProcessor syncRetryProcessor;
+
+	@Operation(tags = "AutoPay Synch Service", description = "Re-Process Failed AutoPay Sync Requests", summary = "Re-Process AutoPay Sync Requests based on origin system and batch size")
+	@PostMapping(path = "/reprocess")
+	@ResponseStatus(HttpStatus.OK)
+	public Mono<ReprocessResponse> reprocessAutoPaySync(@RequestHeader(name = AutoPaySynchConstant.API_VERSION, required = false) String apiVersion, @RequestHeader(name = AutoPaySynchConstant.CORRELATION_ID, required = false) String correlationId, @Valid @RequestBody ReprocessRequest request) {
+		return Mono.deferContextual(context -> {
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "Start of reprocessAutoPaySync(). api-version: {}, request: {}", context.get(AutoPaySynchConstant.CORRELATION_ID),
+					apiVersion, request);
+			syncRetryProcessor.reProcessBatchRecords(request, context.get(AutoPaySynchConstant.CORRELATION_ID));
+			ReprocessResponse response = new ReprocessResponse();
+			response.setStatus(AutoPaySynchConstant.REPROCESS_RESPONSE);
+			return Mono.just(response);
+		});
+	}
+
+	@Operation(tags = "AutoPay Synch Service", description = "Reprocess AutoPay Synch By Id", summary = "Reprocess AutoPay Sync Requests by originSystemIds")
+	@PostMapping(path = "/reprocess-by-id")
+	@ResponseStatus(HttpStatus.OK)
+	public Mono<ReprocessResponse> reprocessAutoPaySynchById(@RequestHeader(name = AutoPaySynchConstant.API_VERSION, required = false) String apiVersion, @RequestHeader(name = AutoPaySynchConstant.CORRELATION_ID, required = false) String correlationId, @Valid @RequestBody ReprocessByIdRequest request) {
+		return Mono.deferContextual(context -> {
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "Start of reprocessAutoPaySynchById(). api-version: {}, request: {}", context.get(AutoPaySynchConstant.CORRELATION_ID),
+					apiVersion, request);
+			syncRetryProcessor.reProcessRecordsByIds(request, context.get(AutoPaySynchConstant.CORRELATION_ID));
+			ReprocessResponse response = new ReprocessResponse();
+			response.setStatus(AutoPaySynchConstant.REPROCESS_RESPONSE);
+			return Mono.just(response);
+		});
+	}
+
+	@Operation(tags = "AutoPay Synch Service", description = "Check Kafka Consumer Health for both LTM and MTL", summary = "Check Kafka Consumer Health for both LTM and MTL")
+	@GetMapping(path = "/kafka-consumer/health-status")
+	@ResponseStatus(HttpStatus.OK)
+	public Mono<ConsumerHealthStatusResponse> checkConsumerHealthStatus() {
+		return Mono.deferContextual(context -> {
+			List<ConsumerStatus> consumers = kafkaConsumers.stream().map(consumer -> {
+				ConsumerStatus consumerStatus = new ConsumerStatus();
+				consumerStatus.setEventType(EventTypeEnum.valueOf(consumer.getEventType().name()));
+				consumerStatus.setStatus((consumer.isConsumerActive() ? StatusEnum.ACTIVE : StatusEnum.INACTIVE));
+				consumerStatus.setTopic(consumer.getTopic());
+				return consumerStatus;
+			}).toList();
+			ConsumerHealthStatusResponse response = new ConsumerHealthStatusResponse();
+			response.setConsumers(consumers);
+			return Mono.just(response);
+		});
+	}
+
+}
+
+
+This is my dao flder classes
+
+package com.creditone.ucrm.autopaysynch.dao;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.repository.autopaysync.AutoPaySynchLinkageRepository;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class AutoPaySynchLinkageDAO {
+
+	private final AutoPaySynchLinkageRepository autoPaySynchLinkageRepository;
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.dao;
+
+public class AutoPaySynchLinkageMapper {
+
+	// All static mapping from entity to response dto and vice versa
+
+}
+
+
+package com.creditone.ucrm.autopaysynch.dao;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.repository.autopaysync.AutoPaySynchLogRepository;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class AutoPaySynchLogDAO {
+
+	private final AutoPaySynchLogRepository autoPaySynchLogRepository;
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.dao;
+
+public class AutoPaySynchLogMapper {
+
+	// All static mapping from entity to response dto and vice versa
+
+}
+
+
+
+This is my dto folder classes
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+public class AccountIdDto {
+    private String accountId;
+    private String legacyCardId;
+
+    public AccountIdDto(String accountId) {
+        this.accountId = accountId;
+    }
+
+    public AccountIdDto(String accountId, String legacyCardId) {
+        this.accountId = accountId;
+        this.legacyCardId = legacyCardId;
+    }
+}
+
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+public class AutoPaySynchLinkageResponse {
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+public class AutoPaySynchLogResponse {
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.dto;
+
+import java.io.Serial;
+import java.io.Serializable;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class ResultDTO implements Serializable {
+	@Serial
+	private static final long serialVersionUID = 4992226327489644995L;
+
+	private Boolean result;
+	private Throwable error;
+}
+
+
+
+This was my exception folder classes
+
+
+package com.creditone.ucrm.autopaysynch.exception;
+
+import java.io.Serial;
+
+import lombok.Data;
+
+@Data
+public class AutoPaySynchException extends RuntimeException {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	private String errorMessage;
+	private String correlationId;
+
+	public AutoPaySynchException(String errorMessage, String correlationId) {
+		super(errorMessage);
+		this.errorMessage = errorMessage;
+		this.correlationId = correlationId;
+	}
+
+	public AutoPaySynchException(String errorMessage, String correlationId, Throwable cause) {
+		super(errorMessage, cause);
+		this.errorMessage = errorMessage;
+		this.correlationId = correlationId;
+	}
+
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.exception;
+
+import java.io.Serial;
+
+import lombok.Data;
+
+@Data
+public class KafkaRetryExhaustedException extends RuntimeException {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+	private String errorMessage;
+
+	public KafkaRetryExhaustedException(String message, Throwable cause) {
+		super(message, cause);
+		this.errorMessage = message;
+	}
+
+	public KafkaRetryExhaustedException(String message) {
+		super(message);
+		this.errorMessage = message;
+	}
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.exception;
+
+import java.io.Serial;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+
+import lombok.Data;
+
+@Data
+public class ServiceUnavailableException extends RuntimeException {
+	@Serial
+	private static final long serialVersionUID = 1L;
+	private String errorMessage;
+	private HttpStatusCode httpStatusCode;
+
+	public ServiceUnavailableException(String errorMessage) {
+		super(errorMessage);
+		this.errorMessage = errorMessage;
+	}
+
+	public ServiceUnavailableException(String errorMessage, Throwable cause) {
+		super(errorMessage, cause);
+		this.httpStatusCode = HttpStatus.SERVICE_UNAVAILABLE;
+		this.errorMessage = errorMessage;
+	}
+}
+
+
+This was my filter folder class
+
+package com.creditone.ucrm.autopaysynch.filter;
+
+import java.time.ZonedDateTime;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.ObjectUtils;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+
+import com.creditone.microservice.util.UUIDGenerator;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+import reactor.util.context.Context;
+
+@Component
+@Slf4j
+public class AutoPaySyncFilter implements WebFilter {
+	private String appName;
+	private static Set<String> uriSubList = new HashSet<String>();
+
+	private String healthUri;
+
+	public AutoPaySyncFilter(@Value(value = "${APP_NAME}") String appName, @Value(value = "${health.uri}") String healthUri) {
+		this.appName = appName;
+		this.healthUri = healthUri;
+	}
+
+	@Override
+	public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+		if (uriSubList.isEmpty()) {
+			uriSubList = new HashSet<String>(Arrays.asList(healthUri.split("\\s*/\\s*")));
+		}
+		String apiPath = exchange.getRequest().getPath() != null ? exchange.getRequest().getPath().toString() : null;
+		if (Arrays.asList(apiPath.split("\\s*/\\s*")).containsAll(uriSubList)) {
+			return chain.filter(exchange);
+		}
+
+		String correlationId = exchange.getRequest().getHeaders() != null && !CollectionUtils.isEmpty(exchange.getRequest().getHeaders().get(AutoPaySynchConstant.CORRELATION_ID))
+				? exchange.getRequest().getHeaders().get(AutoPaySynchConstant.CORRELATION_ID).get(0)
+				: null;
+
+		log.info("correlationId: {}", correlationId);
+
+		if (ObjectUtils.isEmpty(correlationId)) {
+			correlationId = generateUniqueCorrelationId(exchange);
+		}
+
+		return chain.filter(exchange).contextWrite(Context.of(AutoPaySynchConstant.CORRELATION_ID, correlationId));
+	}
+
+	private String generateUniqueCorrelationId(ServerWebExchange exchange) {
+		String[] pathElements = exchange.getRequest().getPath().toString().split("/");
+
+		StringBuilder correlationIdBuffer = new StringBuilder();
+
+		correlationIdBuffer.append(appName).append("_").append(pathElements[pathElements.length - 1]).append("_").append(ZonedDateTime.now());
+
+		return UUIDGenerator.generateType5UUID(correlationIdBuffer.toString()).toString();
+	}
+}
+
+
+
+This was kafka consumer foler classes
+
+package com.creditone.ucrm.autopaysynch.kafka.consumer;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+
+import jakarta.annotation.PreDestroy;
+
+import org.springframework.boot.CommandLineRunner;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+import com.creditone.microservice.util.UUIDGenerator;
+import com.creditone.ucrm.autopaysynch.config.KafkaPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+import com.creditone.ucrm.autopaysynch.exception.KafkaRetryExhaustedException;
+import com.creditone.ucrm.autopaysynch.kafka.event.EventWithCorrelationData;
+import com.creditone.ucrm.autopaysynch.processor.CommonSyncProcessor;
+
+import io.netty.handler.timeout.TimeoutException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.kafka.receiver.ReceiverRecord;
+import reactor.util.retry.Retry;
+
+/**
+ * Abstract base class for reactive Kafka consumers in the autopay synchronization system.
+ * This class provides a standardized framework for consuming Kafka events with built-in resilience
+ * patterns, lifecycle management, and error handling.
+ *
+ * @param <T>
+ */
+@Slf4j
+@RequiredArgsConstructor
+public abstract class AbstractKafkaConsumer<T> implements CommandLineRunner {
+
+	protected final KafkaPropertiesConfig properties;
+	protected final CommonSyncProcessor commonSyncProcessor;
+	protected volatile Disposable consumerDisposable;
+
+	private static final ObjectMapper OBJECT_MAPPER = createObjectMapper();
+
+	private static ObjectMapper createObjectMapper() {
+		ObjectMapper mapper = new ObjectMapper();
+		mapper.registerModule(new JavaTimeModule());
+		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		return mapper;
+	}
+
+	/**
+	 * Initializes and starts the Kafka consumer after bean construction. This method sets up the
+	 * reactive consumer stream with comprehensive error handling, retry logic, and lifecycle
+	 * callbacks for monitoring and debugging.
+	 */
+	public void startConsuming() {
+		log.info("Starting {} Kafka Consumer", getEventType());
+
+		consumerDisposable = createConsumerFlux().doOnSubscribe(subscription -> log.info("Successfully subscribed to {} events for topic {}", getEventType(), getTopic()))
+				.doOnError(error -> log.error("Error consuming {} events for topic {}: {}", getEventType(), getTopic(), ExceptionUtils.getStackTrace(error).replaceAll(
+						"[\\r\\n\\t]+", " "), error)).doOnCancel(() -> log.info("{} consumer cancelled for topic {}", getEventType(), getTopic())).retryWhen(this.createRetrySpec())
+				.subscribe(event -> log.debug("Successfully processed {} event for topic {}: {}", getEventType(), getTopic(), event), error -> log.error(
+						"Fatal error in {} consumer for topic {} : {}", getEventType(), getTopic(), ExceptionUtils.getStackTrace(error).replaceAll("[\\r\\n\\t]+", " "), error),
+						() -> log.info("{} consumer stream completed for topic {}", getEventType(), getTopic()));
+	}
+
+	/**
+	 * Creates a sophisticated retry specification with exponential backoff and jitter. This method
+	 * implements enterprise-grade retry logic to handle transient failures gracefully while
+	 * preventing system overload.
+	 *
+	 * @return configured retry specification
+	 */
+	public Retry createRetrySpec() {
+		KafkaPropertiesConfig.Consumer.Common common = properties.getConsumer().getCommon();
+
+		return Retry.backoff(common.getRetryAttempts(), Duration.ofMillis(common.getRetryBackoffMs())).maxBackoff(Duration.ofMillis(common.getRetryMaxDelayMs())).jitter(common
+				.getRetryJitter()).filter(this::isRetryableException).doBeforeRetry(retrySignal -> log.warn("Retrying Kafka operation, attempt: {}, error: {}", retrySignal
+						.totalRetries() + 1, ExceptionUtils.getStackTrace(retrySignal.failure()).replaceAll("[\\r\\n\\t]+", " "))).onRetryExhaustedThrow(
+								(retryBackoffSpec, retrySignal) -> new KafkaRetryExhaustedException("Kafka operation failed after " + common.getRetryAttempts() + " attempts",
+										retrySignal.failure()));
+	}
+
+	/**
+	 * Determines whether an exception should trigger a retry attempt. This method implements
+	 * intelligent exception classification to avoid retrying permanent failures while handling
+	 * transient issues gracefully.
+	 *
+	 * @param throwable the exception to evaluate
+	 * @return true if the exception is retryable, false otherwise
+	 */
+	private boolean isRetryableException(Throwable throwable) {
+		return throwable instanceof TimeoutException || throwable instanceof org.apache.kafka.common.errors.RetriableException || throwable instanceof java.net.ConnectException
+				|| throwable instanceof org.apache.kafka.clients.consumer.CommitFailedException || throwable instanceof org.apache.kafka.common.errors.RebalanceInProgressException
+				|| (throwable.getMessage() != null && throwable.getMessage().contains("Offset commit cannot be completed") || throwable instanceof Exception);
+	}
+
+	/**
+	 * Abstract method that subclasses must implement to create their specific consumer flux. This
+	 * method defines the actual Kafka consumption logic including topic subscription, message
+	 * deserialization, and event processing pipeline.
+	 *
+	 * @return Flux of EventWithCorrelation to maintain correlation context
+	 */
+	protected abstract Flux<EventWithCorrelationData<T>> createConsumerFlux();
+
+	/**
+	 * Abstract method that subclasses must implement to identify their event type. This method
+	 * provides type identification for logging, monitoring, and debugging purposes.
+	 *
+	 * @return
+	 */
+	public abstract SyncType getEventType();
+
+	/**
+	 * Abstract method that subclasses must implement to identify the topic. This method
+	 * provides topic identification for logging, monitoring, and debugging purposes.
+	 *
+	 * @return
+	 */
+	public abstract String getTopic();
+
+	/**
+	 * Generates a unique correlation ID for distributed tracing and request correlation. This method
+	 * creates deterministic UUIDs based on service name, timestamp, and additional entropy, enabling
+	 * unique request tracking per event across multiple services and systems.
+	 *
+	 * @return unique correlation ID for each event
+	 */
+	protected String generateUniqueCorrelationId() {
+		String name = System.nanoTime() + "_" + UUID.randomUUID();
+		return UUIDGenerator.generateType5UUID(name).toString();
+	}
+
+	/**
+	 * Maps a Kafka consumer record to the target event type with unique correlation ID generation.
+	 * This method handles deserialization with per-event correlation tracking.
+	 *
+	 * @param record           the Kafka consumer record
+	 * @param sourceEventClass the target event class
+	 * @return mapped event object with correlation context
+	 */
+	protected EventWithCorrelationData<T> mapRecordWithCorrelation(ReceiverRecord<String, String> record, Class<T> sourceEventClass) {
+		String correlationId = generateUniqueCorrelationId();
+		Instant startTime = Instant.now();
+		try {
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "Received {} autopay event at {} - Key: {}, Partition: {}, Offset: {}, Topic: {}, Message: {}", correlationId,
+					getEventType(), startTime, record.key(), record.partition(), record.offset(), record.topic(), record.value());
+			T event = OBJECT_MAPPER.readValue(record.value(), sourceEventClass);
+			return new EventWithCorrelationData<>(event, correlationId, startTime, null, record);
+		} catch (Exception e) {
+			Throwable error = new AutoPaySynchException("Failed to map message to " + sourceEventClass.getSimpleName() + " for correlationId: " + correlationId + ", record value: "
+					+ record.value(), correlationId, e);
+			return new EventWithCorrelationData<>(null, correlationId, startTime, error, record);
+		}
+	}
+
+	/**
+	 * Extracts correlation ID from
+	 *
+	 * @param error the exception that occurred
+	 * @return correlation ID or "unknown" if not available
+	 */
+	protected String extractCorrelationId(Throwable error, Object eventWithCorrelation) {
+		if (eventWithCorrelation instanceof EventWithCorrelationData<?> data) {
+			return data.getCorrelationId();
+		}
+		if (error != null) {
+			if (error instanceof AutoPaySynchException syncException) {
+				if (syncException.getCorrelationId() != null) {
+					return syncException.getCorrelationId();
+				}
+			}
+		}
+		return "unknown";
+	}
+
+	@Override
+	public void run(String... args) {
+		log.info("Starting {} Kafka consumer for topic: {}", getEventType(), getTopic());
+		startConsuming();
+	}
+
+	/**
+	 * Performs graceful cleanup of consumer resources during application shutdown. This method
+	 * ensures proper resource disposal and prevents memory leaks by cleanly terminating the consumer
+	 * subscription.
+	 */
+	@PreDestroy
+	public void cleanup() {
+		log.info("Shutting down {} Kafka Consumer for topic: {}", getEventType(), getTopic());
+		if (consumerDisposable != null && !consumerDisposable.isDisposed()) {
+			log.info("Disposing {} consumer subscription for topic: {}", getEventType(), getTopic());
+			consumerDisposable.dispose();
+			log.info("{} consumer disposed successfully for topic: {}", getEventType(), getTopic());
+		}
+	}
+
+	/**
+	 * Checks the current health status of the Kafka consumer. This method provides a simple health
+	 * check mechanism to determine if the consumer is actively processing messages.
+	 *
+	 * @return true if consumer is active, false otherwise
+	 */
+	public boolean isConsumerActive() {
+		return consumerDisposable != null && !consumerDisposable.isDisposed();
+	}
+
+	/**
+	 * Handler to update the sync log response with reason based on the error occurred for future reference
+	 *
+	 * @param eventWithCorrelation
+	 * @param logResponse
+	 * @param error
+	 * @return Mono of ResultDTO
+	 */
+	protected Mono<ResultDTO> handleError(EventWithCorrelationData<?> eventWithCorrelation, AutoPaySynchLogResponse logResponse, Throwable error) {
+
+		return commonSyncProcessor.handleError(eventWithCorrelation, logResponse, getEventType(), error).doFinally(signalType -> {
+			long timeTaken = Duration.between(eventWithCorrelation.getStartTime(), Instant.now()).toMillis();
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "[ERROR] Completed processing for {} event for topic: {}, totalTimeTaken: {}. signalType: {} eventMessage: {} error: {}",
+					eventWithCorrelation.getCorrelationId(), getEventType(), getTopic(), timeTaken, signalType, eventWithCorrelation.getRecord().value(), error != null
+							? ExceptionUtils.getStackTrace(error).replaceAll("[\\r\\n\\t]+", " ")
+							: null);
+		});
+	}
+
+	/**
+	 * Log result with failure or success and the time taken to process each event with other details
+	 *
+	 * @param result
+	 * @param eventWithCorrelation
+	 */
+	protected void logResult(ResultDTO result, EventWithCorrelationData<?> eventWithCorrelation) {
+
+		long timeTaken = Duration.between(eventWithCorrelation.getStartTime(), Instant.now()).toMillis();
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "[{}] Completed processing for {} event for topic: {}, totalTimeTaken: {}. eventMessage: {} error: {}", eventWithCorrelation
+				.getCorrelationId(), ((result != null && Boolean.TRUE.equals(result.getResult())) ? "SUCCESS" : "FAILURE"), getEventType(), getTopic(), timeTaken,
+				eventWithCorrelation.getRecord().value(), (result.getError() != null ? ExceptionUtils.getStackTrace(result.getError()).replaceAll("[\\r\\n\\t]+", " ") : null));
+	}
+
+	/**
+	 * Save event in database and acknowledge the receiver offset
+	 *
+	 * @param eventWithCorrelation
+	 * @param receiverRecord
+	 * @return Mono of AutoPaySynchLogResponse
+	 */
+	protected Mono<AutoPaySynchLogResponse> saveEventAndAcknowledge(EventWithCorrelationData<?> eventWithCorrelation, ReceiverRecord<String, String> receiverRecord) {
+
+		return commonSyncProcessor.saveEvent(eventWithCorrelation, getEventType()).doOnSuccess(logResponse -> {
+			receiverRecord.receiverOffset().acknowledge();
+			log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully saved and acknowledged the event. logResponse: {}", eventWithCorrelation.getCorrelationId(), logResponse);
+		});
+	}
+
+	/**
+	 * Abstract method that subclasses must implement to process their specific event type.
+	 * This method defines the actual event processing logic for each consumer type.
+	 *
+	 * @param event         the deserialized event to process
+	 * @param logResponse   the log response from saving the event
+	 * @param correlationId unique correlation ID for tracking
+	 * @return Mono of ResultDTO containing processing result
+	 */
+	protected abstract Mono<ResultDTO> processEvent(T event, AutoPaySynchLogResponse logResponse, String correlationId);
+
+	/**
+	 * Abstract method that subclasses must implement to get the source event class.
+	 * This is needed for deserialization in mapRecordWithCorrelation.
+	 *
+	 * @return the Class object for the event type
+	 */
+	protected abstract Class<T> getEventClass();
+
+	/**
+	 * Processes a Kafka record with acknowledgment handling.
+	 * This method implements the common processing flow for all consumer types:
+	 * 1. Map record to event with correlation
+	 * 2. Save event to database
+	 * 3. Acknowledge Kafka offset
+	 * 4. Process the event
+	 * 5. Handle any errors
+	 *
+	 * @param receiverRecord the Kafka receiver record
+	 * @return Mono of EventWithCorrelationData
+	 */
+	protected Mono<EventWithCorrelationData<T>> processWithAck(ReceiverRecord<String, String> receiverRecord) {
+
+		return Mono.fromCallable(() -> mapRecordWithCorrelation(receiverRecord, getEventClass())).flatMap(eventWithCorrelation -> saveEventAndAcknowledge(eventWithCorrelation,
+				receiverRecord).flatMap(logResponse -> {
+					// Handle mapping errors
+					if (eventWithCorrelation.getError() != null) {
+						return handleError(eventWithCorrelation, logResponse, eventWithCorrelation.getError());
+					}
+
+					// Process the event
+					return processEvent(eventWithCorrelation.getEvent(), logResponse, eventWithCorrelation.getCorrelationId()).doOnSuccess(result -> logResult(result,
+							eventWithCorrelation)).onErrorResume(error -> handleError(eventWithCorrelation, logResponse, error));
+				}).thenReturn(eventWithCorrelation));
+	}
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.kafka.consumer;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.kafka.core.reactive.ReactiveKafkaConsumerTemplate;
+import org.springframework.stereotype.Component;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.creditone.ucrm.autopaysynch.config.KafkaPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.kafka.event.EventWithCorrelationData;
+import com.creditone.ucrm.autopaysynch.kafka.event.LegacyToModernSourceEvent;
+import com.creditone.ucrm.autopaysynch.processor.CommonSyncProcessor;
+import com.creditone.ucrm.autopaysynch.processor.LegacyToModernProcessor;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+/**
+ * Reactive Kafka consumer implementation for processing legacy autopay events
+ * in the autopay synchronization system. This consumer handles the
+ * migration of autopay data from legacy systems to modern
+ * infrastructure with unique correlation ID per event.
+ */
+@Slf4j
+@Component
+public class LegacyToModernConsumer extends AbstractKafkaConsumer<LegacyToModernSourceEvent> {
+
+	private final ReactiveKafkaConsumerTemplate<String, String> reactiveKafkaLegacyToModernConsumerTemplate;
+	private final LegacyToModernProcessor legacyToModernProcessor;
+
+	/**
+	 * Constructs a new LegacyToModernKafkaConsumer with required dependencies. This
+	 * constructor initializes the consumer with the reactive Kafka template,
+	 * configuration properties, and autopay processor for handling legacy events.
+	 *
+	 * @param reactiveKafkaLegacyConsumerTemplate reactive Kafka consumer template
+	 * @param properties                          Kafka configuration properties
+	 * @param legacyToModernProcessor             autopay processor for legacy events
+	 */
+	public LegacyToModernConsumer(@Qualifier("reactiveKafkaLegacyToModernConsumerTemplate") ReactiveKafkaConsumerTemplate<String, String> reactiveKafkaLegacyToModernConsumerTemplate, KafkaPropertiesConfig properties, LegacyToModernProcessor legacyToModernProcessor, CommonSyncProcessor commonActivityProcessor) {
+		super(properties, commonActivityProcessor);
+		this.reactiveKafkaLegacyToModernConsumerTemplate = reactiveKafkaLegacyToModernConsumerTemplate;
+		this.legacyToModernProcessor = legacyToModernProcessor;
+	}
+
+	/**
+	 * Creates the reactive consumer flux for processing legacy autopay events. This
+	 * method implements the core consumption logic by setting up a reactive stream
+	 * that receives Kafka messages, generates unique correlation IDs per event,
+	 * processes them, and handles errors gracefully while maintaining correlation context.
+	 */
+	@Override
+	protected Flux<EventWithCorrelationData<LegacyToModernSourceEvent>> createConsumerFlux() {
+		return reactiveKafkaLegacyToModernConsumerTemplate.receive().limitRate(properties.getConsumer().getLegacyToModern().getRateLimit(), properties.getConsumer()
+				.getLegacyToModern().getReplenish()).flatMap(receiverRecord -> processWithAck(receiverRecord), properties.getConsumer().getLegacyToModern().getConcurrency())
+				.onErrorContinue((error, value) -> {
+					log.error(AutoPaySynchConstant.LOG_PREFIX + "[FATAL] Error processing {} autopay event: {}, continuing with next message. Error: {}", extractCorrelationId(
+							error, value), getEventType(), value, ExceptionUtils.getStackTrace(error).replaceAll("[\\r\\n\\t]+", " "));
+				});
+	}
+
+	/**
+	 * Returns the synchronization type identifier for this consumer. This method
+	 * provides type identification for logging, monitoring, and operational
+	 * visibility purposes.
+	 *
+	 * @return SyncType.LEGACY_TO_MODERN indicating this consumer handles
+	 *         legacy-to-modern autopay synchronization events
+	 */
+	@Override
+	public SyncType getEventType() {
+		return SyncType.LEGACY_TO_MODERN;
+	}
+
+	@Override
+	public String getTopic() {
+		return properties.getConsumer().getLegacyToModern().getTopic();
+	}
+
+	@Override
+	protected Mono<ResultDTO> processEvent(LegacyToModernSourceEvent event, AutoPaySynchLogResponse logResponse, String correlationId) {
+		return legacyToModernProcessor.processEvent(event, logResponse, correlationId);
+	}
+
+	@Override
+	protected Class<LegacyToModernSourceEvent> getEventClass() {
+		return LegacyToModernSourceEvent.class;
+	}
+
+}
+
+
+
+this was my kafka event folder classes
+
+package com.creditone.ucrm.autopaysynch.kafka.event;
+
+import java.time.Instant;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import reactor.kafka.receiver.ReceiverRecord;
+
+/**
+ * Wrapper class to carry event data along with its unique correlation ID.
+ * This ensures each event maintains its correlation context throughout processing.
+ *
+ * @param <E> the event type
+ */
+@Data
+@AllArgsConstructor
+public class EventWithCorrelationData<E> {
+	private E event;
+	private String correlationId;
+	private Instant startTime;
+	private Throwable error;
+	@JsonIgnore
+	private ReceiverRecord<String, String> record;
+}
+
+
+package com.creditone.ucrm.autopaysynch.kafka.event;
+
+public class LegacyToModernSourceEvent {
+
+}
+
+
+
+This was my model folder classes
+
+
+package com.creditone.ucrm.autopaysynch.model;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+@Data
+@NoArgsConstructor
+@Table("payments.auto_pay")
+public class AutoPayEntity implements Serializable, Persistable<UUID> {
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+    @Id
+    @Column("autopay_id")
+    private UUID autoPayId;
+
+    @Column("customer_id")
+    private UUID customerId;
+
+    @Column("credit_account_id")
+    private UUID creditAccountId;
+
+    @Column("autopay_data")
+    private Json autoPayData;
+
+    @Column("created_by")
+    private String createdBy;
+
+    @Column("created_timestamp")
+    private ZonedDateTime createdTimestamp;
+
+    @Column("updated_by")
+    private String updatedBy;
+
+    @Column("updated_timestamp")
+    private ZonedDateTime updatedTimestamp;
+
+    @Column("auto_payment_day")
+    private Integer autoPaymentDay;
+
+    public AutoPayEntity(UUID autoPayId) {
+        this.setAutoPayId(autoPayId);
+    }
+
+    @Transient
+    private boolean isNew;
+    @Override
+    public UUID getId() {
+        return autoPayId;
+    }
+    @Override
+    public boolean isNew() { return isNew; }
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.model;
+
+import io.r2dbc.postgresql.codec.Json;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+@Data
+@NoArgsConstructor
+@Table("payments.auto_pay_history")
+public class AutoPayHistoryEntity implements Serializable, Persistable<UUID> {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+    @Id
+    @Column("autopay_id")
+    private UUID autoPayId;
+
+    @Column("customer_id")
+    private UUID customerId;
+
+    @Column("credit_account_id")
+    private UUID creditAccountId;
+
+    @Column("autopay_history_data")
+    private Json autoPayHistoryData;
+
+    @Column("created_by")
+    private String createdBy;
+
+    @Column("created_timestamp")
+    private ZonedDateTime createdTimestamp;
+
+    @Column("updated_by")
+    private String updatedBy;
+
+    @Column("updated_timestamp")
+    private ZonedDateTime updatedTimestamp;
+
+    @Column("intent_code")
+    private String intentCode;
+
+    @Column("autopay_enabled")
+    private Boolean autoPayEnabled;
+
+    @Transient
+    private boolean isNew;
+    @Override
+    public UUID getId() {
+        return autoPayId;
+    }
+    @Override
+    public boolean isNew() { return isNew; }
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@Table("autopay_config_sync.autopay_config_linkage")
+public class AutoPaySynchLinkageEntity implements Serializable, Persistable<UUID> {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	@Id
+	@Column("ap_config_linkage_id")
+	private UUID autoPaySyncLinkageId;
+
+	// TODO add other column details
+
+	@Transient
+	private boolean isNew;
+
+	@Override
+	public UUID getId() {
+		return autoPaySyncLinkageId;
+	}
+
+	@Override
+	public boolean isNew() {
+		return isNew;
+	}
+
+}
+
+
+package com.creditone.ucrm.autopaysynch.model;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.UUID;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@Table("autopay_config_sync.autopay_config_sync_logs")
+public class AutoPaySynchLogEntity implements Serializable, Persistable<UUID> {
+
+	@Serial
+	private static final long serialVersionUID = 1L;
+
+	@Id
+	@Column("ap_config_sync_id")
+	private UUID autoPaySyncLogId;
+
+	// TODO add other column details
+
+	@Transient
+	private boolean isNew;
+
+	@Override
+	public UUID getId() {
+		return autoPaySyncLogId;
+	}
+
+	@Override
+	public boolean isNew() {
+		return isNew;
+	}
+
+}
+
+
+
+This was my processor classes
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+
+ - Abstract base processor for Hazelcast-based ID mapping with external service fallback. Provides
+ - common functionality for converting IDs between modern and legacy systems.
+ -
+ - @param <T> the return type for converted IDs
+ */
+@Slf4j
+@RequiredArgsConstructor
+public abstract class AbstractHazelcastLookupProcessor<T> {
+
+    protected final HazelcastWrapperProcessor hazelcastWrapperProcessor;
+    protected final ExternalCallService externalCallService;
+
+    /**
+     - Converts an ID based on the specified sync type. First attempts to retrieve from Hazelcast
+     - cache, then falls back to external service.
+     -
+     - @param key           the ID to convert
+     - @param syncType      the direction of conversion
+     - @param correlationId unique identifier for tracking the request
+     - @return Mono containing the converted ID, or empty if conversion fails
+     */
+    public Mono<T> convertId(String key, SyncType syncType, String correlationId) {
+        if (key == null || key.trim().isEmpty()) {
+            log.warn(AutoPaySynchConstant.LOG_PREFIX + "Invalid key provided for {} conversion for {}", correlationId, getEntityType(), syncType);
+            return Mono.empty();
+        }
+
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "{} Converting ID for {}: key={}", correlationId, getEntityType(), syncType, key);
+
+        return getIdFromHazelcast(key, syncType, correlationId).switchIfEmpty(fallbackToExternalService(key, syncType, correlationId)).doOnSuccess(result -> {
+            if (result != null) {
+                log.info(AutoPaySynchConstant.LOG_PREFIX + "{} ID conversion successful for {}: {} -> {}", correlationId, getEntityType(), syncType, key, result);
+            }
+        });
+    }
+
+    /** Retrieves ID from Hazelcast cache based on sync type configuration. */
+    private Mono<T> getIdFromHazelcast(String key, SyncType syncType, String correlationId) {
+        try {
+            String mapName = getMapName(syncType);
+            String keyName = getKeyName(syncType);
+
+
+            IMap<String, GenericRecord> map = hazelcastWrapperProcessor.getMap(mapName, correlationId);
+            if (map == null) {
+                log.warn(AutoPaySynchConstant.LOG_PREFIX + "Hazelcast map '{}' not found for {}", correlationId, mapName, syncType);
+                return Mono.empty();
+            }
+
+            GenericRecord record = map.get(key);
+            if (record == null) {
+                log.warn(AutoPaySynchConstant.LOG_PREFIX + "Record not found for key '{}' in map '{}' for {}", correlationId, key, mapName, syncType);
+                return Mono.empty();
+            }
+
+            return processRecord(record, syncType, correlationId, keyName);
+
+        } catch (Exception e) {
+            log.warn(AutoPaySynchConstant.LOG_PREFIX + "Error retrieving {} ID for {} from Hazelcast for key={}, error={}, cause={}", getEntityType(), syncType, correlationId,
+                    key, e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+            return Mono.empty();
+        }
+
+    }
+
+    /** Fallback method that delegates to external service when Hazelcast lookup fails. */
+    private Mono<T> fallbackToExternalService(String key, SyncType syncType, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Falling back to externalCallService for {} for key={}", correlationId, syncType, key);
+        return callExternalService(key, syncType, correlationId);
+    }
+
+    // Abstract methods to be implemented by concrete classes
+    protected abstract String getMapName(SyncType syncType);
+
+    protected abstract String getKeyName(SyncType syncType);
+
+    protected abstract String getEntityType();
+
+    protected abstract Mono<T> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName);
+
+    protected abstract Mono<T> callExternalService(String key, SyncType syncType, String correlationId);
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.config.AgentMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(AgentMappingPropertiesConfig.class)
+public class AgentMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
+
+    private final AgentMappingPropertiesConfig config;
+
+    public AgentMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor, ExternalCallService externalCallService, AgentMappingPropertiesConfig config) {
+        super(hazelcastWrapperProcessor, externalCallService);
+        this.config = config;
+    }
+
+    public Mono<String> getModernAgentId(String legacyAgentId, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern agent ID for legacyAgentId: {}", correlationId, legacyAgentId);
+        return convertId(legacyAgentId, SyncType.LEGACY_TO_MODERN, correlationId);
+    }
+
+    @Override
+    protected String getMapName(SyncType syncType) {
+        return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getMapName() : config.getLegacyToModern().getMapName();
+    }
+
+    @Override
+    protected String getKeyName(SyncType syncType) {
+        return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getKeyName() : config.getLegacyToModern().getKeyName();
+    }
+
+    @Override
+    protected String getEntityType() {
+        return "AGENT";
+    }
+
+    @Override
+    protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+        String agentId = record.getString(keyName);
+        if (agentId == null || agentId.trim().isEmpty()) {
+            log.warn(AutoPaySynchConstant.LOG_PREFIX + "Agent ID is null or empty for keyName '{}' for {}", correlationId, keyName, syncType);
+            return Mono.empty();
+        }
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved agent ID for {} from Hazelcast: {}", correlationId, syncType, agentId);
+        return Mono.just(agentId.trim());
+    }
+
+    @Override
+    protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+        return externalCallService.convertAgentId(key, syncType, correlationId);
+    }
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.kafka.event.EventWithCorrelationData;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@Component
+public class CommonSyncProcessor {
+
+	public Mono<ResultDTO> handleError(EventWithCorrelationData<?> eventWithCorrelation, AutoPaySynchLogResponse activityResponse, SyncType syncType, Throwable error) {
+		// TODO save fatal error which cannot be processed for later processing
+		return Mono.empty();
+	}
+
+	public Mono<AutoPaySynchLogResponse> saveEvent(EventWithCorrelationData<?> eventWithCorrelation, SyncType syncType) {
+		return null;
+	}
+
+}
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.config.CustomerMappingPropertiesConfig;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Slf4j
+@Component
+@RefreshScope
+@EnableConfigurationProperties(CustomerMappingPropertiesConfig.class)
+public class CustomerMappingProcessor extends AbstractHazelcastLookupProcessor<String> {
+
+    private final CustomerMappingPropertiesConfig config;
+
+    public CustomerMappingProcessor(HazelcastWrapperProcessor hazelcastWrapperProcessor, ExternalCallService externalCallService, CustomerMappingPropertiesConfig config) {
+        super(hazelcastWrapperProcessor, externalCallService);
+        this.config = config;
+    }
+
+    public Mono<String> getModernCustomerId(String legacyCustomerId, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Resolving modern customer ID for legacyCustomerId: {}", correlationId, legacyCustomerId);
+        return convertId(legacyCustomerId, SyncType.LEGACY_TO_MODERN, correlationId);
+    }
+
+    @Override
+    protected String getMapName(SyncType syncType) {
+        return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getMapName() : config.getLegacyToModern().getMapName();
+    }
+
+    @Override
+    protected String getKeyName(SyncType syncType) {
+        return syncType == SyncType.MODERN_TO_LEGACY ? config.getModernToLegacy().getKeyName() : config.getLegacyToModern().getKeyName();
+    }
+
+    @Override
+    protected String getEntityType() {
+        return "CUSTOMER";
+    }
+
+    @Override
+    protected Mono<String> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName) {
+        String customerId = record.getString(keyName);
+        if (customerId == null || customerId.trim().isEmpty()) {
+            log.warn(AutoPaySynchConstant.LOG_PREFIX + "Customer ID is null or empty for keyName '{}' for {}", correlationId, keyName, syncType);
+            return Mono.empty();
+        }
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully retrieved customer ID for {} from Hazelcast: {}", correlationId, syncType, customerId);
+        return Mono.just(customerId.trim());
+    }
+
+    @Override
+    protected Mono<String> callExternalService(String key, SyncType syncType, String correlationId) {
+        return externalCallService.convertCustomerId(key, syncType, correlationId);
+    }
+
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+
+ - Wrapper processor for Hazelcast operations in the autopay synchronization system. Provides
+ - safe access to Hazelcast distributed maps. This component handles optional Hazelcast dependency
+ - injection and provides error handling for distributed cache operations.
+ */
+@Component
+@Slf4j
+public class HazelcastWrapperProcessor {
+
+    private final HazelcastInstance hazelcastInstance;
+    private final boolean hazelcastAvailable;
+
+    public HazelcastWrapperProcessor(@Autowired(required = false) HazelcastInstance hazelcastInstance) {
+        this.hazelcastInstance = hazelcastInstance;
+        this.hazelcastAvailable = hazelcastInstance != null;
+        if (hazelcastAvailable) {
+            log.info("HazelcastWrapperProcessor initialized with active Hazelcast instance");
+        }
+    }
+
+    /**
+     - Retrieves a distributed map from Hazelcast by name with error handling. Returns null if
+     - Hazelcast is unavailable or if an error occurs during map retrieval. This method provides safe
+     - access to Hazelcast maps with graceful failure handling.
+     -
+     - @param mapName       the name of the distributed map to retrieve
+     - @param correlationId unique identifier for tracking this operation across logs
+     - @return the requested IMap containing GenericRecord values, or null if unavailable or on error
+     */
+    public IMap<String, GenericRecord> getMap(String mapName, String correlationId) {
+        try {
+            if (hazelcastAvailable) {
+                return hazelcastInstance.getMap(mapName);
+            }
+
+            return null;
+        }  catch (Exception e) {
+            log.error(AutoPaySynchConstant.LOG_PREFIX + "Error getting map {} from Hazelcast, error: {} cause: {}", correlationId, mapName, e.getMessage(), ExceptionUtils
+                    .getStackTrace(e).replaceAll("\\r?\\n", " "));
+            return null;
+        }
+    }
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.ucrm.autopaysynch.config.SyncContext;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLinkageResponse;
+import com.creditone.ucrm.autopaysynch.dto.AutoPaySynchLogResponse;
+import com.creditone.ucrm.autopaysynch.dto.ResultDTO;
+import com.creditone.ucrm.autopaysynch.kafka.event.LegacyToModernSourceEvent;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Component
+@Slf4j
+@RequiredArgsConstructor
+public class LegacyToModernProcessor {
+
+	public Mono<ResultDTO> processEvent(LegacyToModernSourceEvent event, AutoPaySynchLogResponse logResponse, String correlationId) {
+
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Starting {} autopay sync process.", correlationId, SyncType.LEGACY_TO_MODERN);
+
+		return findOrCreateLinkage(event, logResponse, correlationId).flatMap(linkageResponse -> prepareInitialSyncContext(event, linkageResponse, logResponse, correlationId))
+				.flatMap(context -> executeSyncMappingFlow(context).flatMap(this::handleSuccess).onErrorResume(error -> handleError(context, error)));
+	}
+
+	private Mono<AutoPaySynchLinkageResponse> findOrCreateLinkage(LegacyToModernSourceEvent event, AutoPaySynchLogResponse logResponse, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding or creating linkage.", correlationId);
+
+		// TODO: Implement linkage find or create logic
+		return Mono.empty();
+	}
+
+	private Mono<SyncContext> prepareInitialSyncContext(LegacyToModernSourceEvent event, AutoPaySynchLinkageResponse linkageResponse, AutoPaySynchLogResponse logResponse, String correlationId) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Preparing initial sync context with event: {} linkageResponse: {} ", correlationId, event, linkageResponse);
+
+		SyncContext context = SyncContext.builder().legacyEvent(event).linkageResponse(linkageResponse).logResponse(logResponse).correlationId(correlationId).build();
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> executeSyncMappingFlow(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Executing {} autopay sync mapping flow for context: {}", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN, context);
+
+		return Mono.just(context).flatMap(this::findModernCustomerId).flatMap(this::findModernAgentId).flatMap(this::findModernCreditAccountId).flatMap(
+				this::findModernExternalBankAccountDetails).flatMap(this::saveAutopayAndHistory);
+	}
+
+	private Mono<SyncContext> findModernCustomerId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern customer ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern customer ID lookup
+		// TODO: Set context.setIndividualUniqueIdentifierKey(customerId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernAgentId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern agent ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern agent ID lookup
+		// TODO: Set context.setAgentId(agentId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernCreditAccountId(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern credit account ID using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement modern credit account ID lookup
+		// TODO: Set context.setCreditAccountId(creditAccountId)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> findModernExternalBankAccountDetails(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Finding modern external bank account details using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement external bank account details lookup
+		// TODO: Set context.setExternalAccountId(externalAccountId)
+		// TODO: Set context.setExternalBankName(bankName)
+		// TODO: Set context.setExternalAccountLast4(accountLast4)
+
+		return Mono.just(context);
+	}
+
+	private Mono<SyncContext> saveAutopayAndHistory(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Saving autopay and history using context: {}", context.getCorrelationId(), context);
+
+		// TODO: Implement autopay and auto pay history save or update logic
+
+		return Mono.just(context);
+	}
+
+	private Mono<Void> upsertLinkageAndLog(SyncContext context, boolean isSuccess, Throwable error) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Upserting linkage and log using context: {} success: {}", context.getCorrelationId(), context, isSuccess);
+
+		// TODO: Implement linkage and log upsert logic
+		// TODO: Update linkage/log with success or failure status
+		// TODO: If isSuccess is false, include error details from the error parameter
+		// TODO: Log partial sync state from context (which fields were successfully mapped)
+
+		return Mono.empty();
+	}
+
+	private Mono<ResultDTO> handleSuccess(SyncContext context) {
+		log.info(AutoPaySynchConstant.LOG_PREFIX + "Successfully completed {} autopay sync process.", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN);
+
+		return upsertLinkageAndLog(context, true, null).map(ctx -> new ResultDTO(true, null));
+	}
+
+	private Mono<ResultDTO> handleError(SyncContext context, Throwable error) {
+		log.error(AutoPaySynchConstant.LOG_PREFIX + "Error in {} autopay sync process using context: {} error: {}", context.getCorrelationId(), SyncType.LEGACY_TO_MODERN, context,
+				error.getMessage());
+
+		// TODO: Access all values set in context up to the failure point:
+		// TODO: - context.getIndividualUniqueIdentifierKey()
+		// TODO: - context.getAgentId()
+		// TODO: - context.getCreditAccountId()
+		// TODO: - context.getExternalAccountId()
+		// TODO: - context.getExternalBankName()
+		// TODO: - context.getExternalAccountLast4()
+
+		return upsertLinkageAndLog(context, false, error).map(ctx -> new ResultDTO(false, error));
+	}
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.processor;
+
+import jakarta.validation.Valid;
+
+import org.springframework.stereotype.Component;
+
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ReprocessByIdRequest;
+import com.creditone.swagger.autopayconfigsyncservice.dtoswagger.ReprocessRequest;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+@Component
+@Slf4j
+@RequiredArgsConstructor
+public class SyncRetryProcessor {
+
+	private final LegacyToModernProcessor legacyToModernProcessor;
+
+	public Mono<Void> reProcessBatchRecords(@Valid ReprocessRequest request, Object object) {
+		// TODO Auto-generated method stub
+		return Mono.empty();
+	}
+
+	public Mono<Void> reProcessRecordsByIds(@Valid ReprocessByIdRequest request, Object object) {
+		// TODO Auto-generated method stub
+		return Mono.empty();
+	}
+
+}
+
+
+
+This was my repository autopay folder classes
+
+package com.creditone.ucrm.autopaysynch.repository.autopay;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPayHistoryEntity;
+
+@Repository
+public interface AutoPayHistoryRepository extends R2dbcRepository<AutoPayHistoryEntity, UUID> {
+
+}
+
+
+
+
+package com.creditone.ucrm.autopaysynch.repository.autopay;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPayEntity;
+
+@Repository
+public interface AutoPayRepository extends R2dbcRepository<AutoPayEntity, UUID> {
+}
+
+
+This was my repository autopaysync folder classes
+
+package com.creditone.ucrm.autopaysynch.repository.autopaysync;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLinkageEntity;
+
+@Repository
+public interface AutoPaySynchLinkageRepository extends R2dbcRepository<AutoPaySynchLinkageEntity, UUID> {
+
+}
+
+
+
+package com.creditone.ucrm.autopaysynch.repository.autopaysync;
+
+import java.util.UUID;
+
+import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.stereotype.Repository;
+
+import com.creditone.ucrm.autopaysynch.model.AutoPaySynchLogEntity;
+
+@Repository
+public interface AutoPaySynchLogRepository extends R2dbcRepository<AutoPaySynchLogEntity, UUID> {
+
+}
+
+
+
+This was my service folder classes
+
+
+package com.creditone.ucrm.autopaysynch.service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
+import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.StringUtils;
+
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.PageUserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponse;
+import com.creditone.swagger.agentidfallbackservice.dtoswagger.UserResponseMetaData;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkage;
+import com.creditone.swagger.ciam.dtoswagger.SystemLinkagesResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponse;
+import com.creditone.swagger.creditaccountservice.dtoswagger.AccountsDetailsResponseContentInner;
+
+import com.creditone.ucrm.autopaysynch.clienthandler.AutoPaySyncClientHandler;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.dto.AccountIdDto;
+import com.creditone.ucrm.autopaysynch.exception.AutoPaySynchException;
+
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+
+ - Service responsible for all external HTTP API calls in the autopay synchronization system.
+ - Converts legacy IDs to modern IDs (and vice versa) by calling:
+ - - Credit Account Service       → getModernCreditAccountId()
+ - - CIAM / Customer Domain Service → convertCustomerId()
+ - - Agent ID Fallback Service     → convertAgentId()
+ */
+@Slf4j
+@Component
+@RefreshScope
+@RequiredArgsConstructor
+@EnableConfigurationProperties(ExternalCallService.ExternalServiceConfig.class)
+public class ExternalCallService {
+
+    private final ExternalServiceConfig externalServiceConfig;
+    private final AutoPaySyncClientHandler autoPaySyncClientHandler;
+
+
+    @Data
+    @ConfigurationProperties(prefix = "external-service")
+    public static class ExternalServiceConfig {
+
+        private CiamConfig ciam;
+        private CreditAccountConfig creditAccount;
+        private CoOp hazelcast;
+
+        @Data
+        public static class CiamConfig {
+            private String host;
+            private String productsUri;
+            private String apikey;
+        }
+
+        @Data
+        public static class CreditAccountConfig {
+            private String host;
+            private String accountsUri;
+            private String apikey;
+        }
+
+        @Data
+        public static class CoOp {
+            private String host;
+            private String apikey;
+            private String hazelcastAgentIdFallbackServiceUri;
+        }
+
+    }
+
+// ─────────────────────────────────────────────────────────────
+// getModernCreditAccountId
+// Calls: Credit Account Service
+// ─────────────────────────────────────────────────────────────
+
+    public Mono<AccountIdDto> getModernCreditAccountId(String modernCustomerId, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to getModernCreditAccountId() for modernCustomerId: {}",
+                correlationId, modernCustomerId);
+
+        var headers = createHeaders(externalServiceConfig.getCreditAccount().getApikey(), correlationId);
+        var params = new LinkedMultiValueMap<String, String>();
+        params.add("individualId", modernCustomerId);
+
+        String url = externalServiceConfig.getCreditAccount().getHost()
+                + externalServiceConfig.getCreditAccount().getAccountsUri();
+
+        return autoPaySyncClientHandler.get(url, headers, "credit-account-service", params)
+                .bodyToMono(AccountsDetailsResponse.class)
+                .doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+                                + "Response from getModernCreditAccountId() for modernCustomerId: {}: {}",
+                        correlationId, modernCustomerId, response))
+                .flatMap(response -> extractModernCreditAccountId(response, modernCustomerId, correlationId))
+                .onErrorResume(err -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "Error in getModernCreditAccountId() for modernCustomerId: {}, Error: {}",
+                            correlationId, modernCustomerId, err.getMessage());
+                    return Mono.error(err);
+                });
+    }
+
+    private Mono<AccountIdDto> extractModernCreditAccountId(AccountsDetailsResponse response,
+                                                            String modernCustomerId, String correlationId) {
+        if (response == null) {
+            return Mono.error(new AutoPaySynchException(
+                    "Null response from Credit Account Service for modernCustomerId: " + modernCustomerId,
+                    correlationId));
+        }
+
+        List<AccountsDetailsResponseContentInner> content = response.getContent();
+        if (content == null || content.isEmpty()) {
+            return Mono.error(new AutoPaySynchException(
+                    "No account data found for modernCustomerId: " + modernCustomerId, correlationId));
+        }
+
+        return content.stream()
+                .filter(Objects::nonNull)
+                .map(AccountsDetailsResponseContentInner::getAccountId)
+                .filter(Objects::nonNull)
+                .map(Object::toString)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .map(AccountIdDto::new)
+                .map(Mono::just)
+                .orElseGet(() -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "No modern credit account ID found for modernCustomerId: {}",
+                            correlationId, modernCustomerId);
+                    return Mono.error(new AutoPaySynchException(
+                            "No modern credit account ID found for modernCustomerId: " + modernCustomerId,
+                            correlationId));
+                });
+    }
+
+// ─────────────────────────────────────────────────────────────
+// convertCustomerId
+// Calls: CIAM / Customer Domain Service
+// Fallback for: CustomerMappingProcessor
+// ─────────────────────────────────────────────────────────────
+
+    public Mono<String> convertCustomerId(String customerId, SyncType syncType, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertCustomerId() for {} for customerId: {}",
+                correlationId, syncType, customerId);
+
+        var headers = createHeaders(externalServiceConfig.getCiam().getApikey(), correlationId);
+        var params = new LinkedMultiValueMap<String, String>();
+
+        if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+            params.add("systemCustomerId", customerId);
+        } else {
+            params.add("individualUniqueIdentifier", customerId);
+        }
+
+        String url = externalServiceConfig.getCiam().getHost()
+                + externalServiceConfig.getCiam().getProductsUri();
+
+        return autoPaySyncClientHandler.get(url, headers, "customer-domain-service", params)
+                .bodyToMono(SystemLinkagesResponse.class)
+                .doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+                        + "Response from convertCustomerId() for {}: {}", correlationId, syncType, response))
+                .flatMap(response -> extractCustomerIdFromResponse(response, syncType, customerId, correlationId))
+                .onErrorResume(err -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "Error in convertCustomerId() for {}, Error: {}",
+                            correlationId, syncType, err.getMessage());
+                    return Mono.error(err);
+                });
+    }
+
+    private Mono<String> extractCustomerIdFromResponse(SystemLinkagesResponse response, SyncType syncType,
+                                                       String customerId, String correlationId) {
+        if (response == null) {
+            return Mono.error(new AutoPaySynchException(
+                    "Null response from CIAM service for customerId: " + customerId, correlationId));
+        }
+
+        List<SystemLinkage> content = response.getContent();
+        if (content == null || content.isEmpty()) {
+            return Mono.error(new AutoPaySynchException(
+                    "No system linkage data found for customerId: " + customerId + " syncType: " + syncType,
+                    correlationId));
+        }
+
+        return switch (syncType) {
+            case LEGACY_TO_MODERN -> extractModernCustomerId(content, customerId, correlationId);
+            case MODERN_TO_LEGACY -> extractLegacyCustomerId(content, customerId, correlationId);
+        };
+    }
+
+    private Mono<String> extractModernCustomerId(List<SystemLinkage> content, String customerId,
+                                                 String correlationId) {
+        return content.stream()
+                .filter(Objects::nonNull)
+                .map(SystemLinkage::getIndividualUniqueIdentifier)
+                .filter(Objects::nonNull)
+                .map(Object::toString)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .map(Mono::just)
+                .orElseGet(() -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "No modern customer ID found for legacyCustomerId: {}",
+                            correlationId, customerId);
+                    return Mono.error(new AutoPaySynchException(
+                            "No modern customer ID found for legacyCustomerId: " + customerId, correlationId));
+                });
+    }
+
+    private Mono<String> extractLegacyCustomerId(List<SystemLinkage> content, String customerId,
+                                                 String correlationId) {
+        return content.stream()
+                .filter(Objects::nonNull)
+                .map(SystemLinkage::getSystemCustomerId)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .map(Mono::just)
+                .orElseGet(() -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "No legacy customer ID found for modernCustomerId: {}",
+                            correlationId, customerId);
+                    return Mono.error(new AutoPaySynchException(
+                            "No legacy customer ID found for modernCustomerId: " + customerId, correlationId));
+                });
+    }
+
+// ─────────────────────────────────────────────────────────────
+// convertAgentId
+// Calls: Agent ID Fallback Service
+// Fallback for: AgentMappingProcessor
+// ─────────────────────────────────────────────────────────────
+
+    public Mono<String> convertAgentId(String agentId, SyncType syncType, String correlationId) {
+        log.info(AutoPaySynchConstant.LOG_PREFIX + "Request to convertAgentId() for {} for agentId: {}",
+                correlationId, syncType, agentId);
+
+        var headers = new HashMap<String, String>();
+        headers.put(AutoPaySynchConstant.CORRELATION_ID, correlationId);
+        headers.put("apiKey", externalServiceConfig.getHazelcast().getApikey());
+        headers.put("requestedBy", AutoPaySynchConstant.AUTOPAY_SYNCH_SERVICE);
+
+        var params = new LinkedMultiValueMap<String, String>();
+        if (SyncType.LEGACY_TO_MODERN.equals(syncType)) {
+            params.add("casId", agentId);
+        } else {
+            params.add("userUniqueIdentifier", agentId);
+        }
+
+        String url = externalServiceConfig.getHazelcast().getHost()
+                + externalServiceConfig.getHazelcast().getHazelcastAgentIdFallbackServiceUri();
+
+        return autoPaySyncClientHandler.get(url, headers, "agent-id-fallback-service", params)
+                .bodyToMono(PageUserResponse.class)
+                .doOnNext(response -> log.info(AutoPaySynchConstant.LOG_PREFIX
+                        + "Response from convertAgentId() for {}: {}", correlationId, syncType, response))
+                .flatMap(response -> extractAgentIdFromResponse(response, syncType, agentId, correlationId))
+                .onErrorResume(err -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                                    + "Error in convertAgentId() for {}, Error: {}",
+                            correlationId, syncType, err.getMessage());
+                    return Mono.error(err);
+                });
+    }
+
+    private Mono<String> extractAgentIdFromResponse(PageUserResponse response, SyncType syncType,
+                                                    String agentId, String correlationId) {
+        if (response == null) {
+            return Mono.error(new AutoPaySynchException(
+                    "Null response from Agent ID Fallback Service for agentId: " + agentId, correlationId));
+        }
+
+        List<UserResponse> content = response.getContent();
+        if (content == null || content.isEmpty()) {
+            return Mono.error(new AutoPaySynchException(
+                    "No user data found for agentId: " + agentId + " syncType: " + syncType, correlationId));
+        }
+
+        return switch (syncType) {
+            case LEGACY_TO_MODERN -> extractModernAgentId(content, agentId, correlationId);
+            case MODERN_TO_LEGACY -> extractLegacyAgentId(content, agentId, correlationId);
+        };
+    }
+
+    private Mono<String> extractModernAgentId(List<UserResponse> content, String agentId, String correlationId) {
+        return content.stream()
+                .filter(Objects::nonNull)
+                .map(UserResponse::getUniqueIdentifier)
+                .filter(Objects::nonNull)
+                .map(Object::toString)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .map(Mono::just)
+                .orElseGet(() -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                            + "No modern agent ID found for legacy casId: {}", correlationId, agentId);
+                    return Mono.error(new AutoPaySynchException(
+                            "No modern agent ID found for legacy casId: " + agentId, correlationId));
+                });
+    }
+
+    private Mono<String> extractLegacyAgentId(List<UserResponse> content, String agentId, String correlationId) {
+        return content.stream()
+                .filter(Objects::nonNull)
+                .map(UserResponse::getMetaData)
+                .filter(Objects::nonNull)
+                .map(UserResponseMetaData::getCasId)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .map(Mono::just)
+                .orElseGet(() -> {
+                    log.error(AutoPaySynchConstant.LOG_PREFIX
+                            + "No legacy casId found for modern agentId: {}", correlationId, agentId);
+                    return Mono.error(new AutoPaySynchException(
+                            "No legacy casId found for modern agentId: " + agentId, correlationId));
+                });
+    }
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+    private Map<String, String> createHeaders(String apiKey, String correlationId) {
+        return Map.of("apiKey", apiKey, AutoPaySynchConstant.CORRELATION_ID, correlationId);
+    }
+
+}
+
+
+
+This is my swagger agentidfallbackservice 
+
+
+co-op-user-admin-service
+ v0.17.2 
+OAS 3.0
+Co Op User Admin Service
+
+Servers
+
+https://devapi.vda.dv01.c1busw2.aws/private/enterprise/co-op/user-admin - DEV
+Authorize
+Users
+
+
+GET
+/users
+Get Users
+
+Parameters
+Try it out
+Name	Description
+page
+integer($int32)
+(query)
+Default value : 0
+
+0
+size
+integer($int32)
+(query)
+Default value : 20
+
+20
+firstName
+string
+(query)
+firstName
+lastName
+string
+(query)
+lastName
+organizationId
+string($uuid)
+(query)
+organizationId
+externalId
+string
+(query)
+externalId
+status
+string
+(query)
+Available values : ACT, INA
+
+
+--
+emailAddress
+string
+(query)
+emailAddress
+userUniqueIdentifier
+string($uuid)
+(query)
+userUniqueIdentifier
+casId
+string
+(query)
+casId
+fdrId
+string
+(query)
+fdrId
+requestedBy *
+string
+(header)
+requestedBy
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+application/json
+Controls Accept header.
+Example Value
+Schema
+{
+  "totalElements": 0,
+  "totalPages": 0,
+  "size": 0,
+  "content": [
+    {
+      "uniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
+      "title": "MR",
+      "firstName": "John",
+      "middleName": "J",
+      "lastName": "Doe",
+      "displayFirstName": "John",
+      "displayLastName": "Doe",
+      "dateOfBirth": "2000-01-18",
+      "trainingStartDate": "2000-01-18",
+      "trainingEndDate": "2000-01-18",
+      "departmentCode": "string",
+      "designation": "string",
+      "department": "string",
+      "genderCode": "M",
+      "organizations": [
+        {
+          "organizationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "externalId": "c1b-001"
+        }
+      ],
+      "emailAddress": "example@creditone.com",
+      "status": "ACT",
+      "terminationReason": "VOLUNTARY",
+      "terminationSubReason": "RELOCATION",
+      "createdBy": "MYN",
+      "createdDate": "string",
+      "updatedBy": "MYN",
+      "updatedDate": "string",
+      "metaData": {
+        "bmaManagerId": "string",
+        "bmaRoleId": "string",
+        "batchNumber": "string",
+        "trainerId": "string",
+        "casId": "string",
+        "fdrId": "string",
+        "newAlertEmail": [
+          "jane.doe@creditone.com",
+          "jane.doe@creditone.com"
+        ],
+        "escalatedAlertMail": [
+          "jane.doe@creditone.com",
+          "jane.doe@creditone.com"
+        ],
+        "escalated2AlertMail": [
+          "jane.doe@creditone.com",
+          "jane.doe@creditone.com"
+        ]
+      },
+      "supervisorId": "string",
+      "hireDate": "2000-01-18",
+      "effectiveDate": "2000-01-18",
+      "productionDate": "2000-01-18",
+      "versantScore": [
+        {
+          "language": "string",
+          "score": 0,
+          "versantScoreDate": "2000-01-18"
+        }
+      ],
+      "addresses": [
+        {
+          "userAddressId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "userUniqueIdentifier": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "organizationServiceLocationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "workHours": "string",
+          "location": "string",
+          "createdBy": "string",
+          "createdTimestamp": "string"
+        }
+      ],
+      "phoneExtension": "1234",
+      "projectSkill": "Test",
+      "userAttested": true,
+      "userAttestedBy": "string"
+    }
+  ],
+  "number": 0,
+  "sort": {
+    "empty": true,
+    "unsorted": true,
+    "sorted": true
+  },
+  "numberOfElements": 0,
+  "first": true,
+  "last": true,
+  "pageable": {
+    "offset": 0,
+    "sort": {
+      "empty": true,
+      "unsorted": true,
+      "sorted": true
+    },
+    "unpaged": true,
+    "paged": true,
+    "pageNumber": 0,
+    "pageSize": 0
+  },
+  "empty": true
+}
+No links
+
+GET
+/users/{id}
+Get User Details
+
+Parameters
+Try it out
+Name	Description
+id *
+string($uuid)
+(path)
+Individual Unique Identifier of the User
+
+id
+requestedBy *
+string
+(header)
+requestedBy
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+application/json
+Controls Accept header.
+Example Value
+Schema
+{
+  "uniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
+  "title": "MR",
+  "firstName": "John",
+  "middleName": "J",
+  "lastName": "Doe",
+  "displayFirstName": "John",
+  "displayLastName": "Doe",
+  "dateOfBirth": "2000-01-18",
+  "trainingStartDate": "2000-01-18",
+  "trainingEndDate": "2000-01-18",
+  "departmentCode": "string",
+  "designation": "string",
+  "department": "string",
+  "genderCode": "M",
+  "organizations": [
+    {
+      "organizationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "externalId": "c1b-001"
+    }
+  ],
+  "emailAddress": "example@creditone.com",
+  "status": "ACT",
+  "terminationReason": "VOLUNTARY",
+  "terminationSubReason": "RELOCATION",
+  "createdBy": "MYN",
+  "createdDate": "string",
+  "updatedBy": "MYN",
+  "updatedDate": "string",
+  "metaData": {
+    "bmaManagerId": "string",
+    "bmaRoleId": "string",
+    "batchNumber": "string",
+    "trainerId": "string",
+    "casId": "string",
+    "fdrId": "string",
+    "newAlertEmail": [
+      "jane.doe@creditone.com",
+      "jane.doe@creditone.com"
+    ],
+    "escalatedAlertMail": [
+      "jane.doe@creditone.com",
+      "jane.doe@creditone.com"
+    ],
+    "escalated2AlertMail": [
+      "jane.doe@creditone.com",
+      "jane.doe@creditone.com"
+    ]
+  },
+  "supervisorId": "string",
+  "hireDate": "2000-01-18",
+  "effectiveDate": "2000-01-18",
+  "productionDate": "2000-01-18",
+  "versantScore": [
+    {
+      "language": "string",
+      "score": 0,
+      "versantScoreDate": "2000-01-18"
+    }
+  ],
+  "addresses": [
+    {
+      "userAddressId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "userUniqueIdentifier": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "organizationServiceLocationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "workHours": "string",
+      "location": "string",
+      "createdBy": "string",
+      "createdTimestamp": "string"
+    }
+  ],
+  "phoneExtension": "1234",
+  "projectSkill": "Test",
+  "userAttested": true,
+  "userAttestedBy": "string"
+}
+No links
+
+Schemas
+BadRequestError
+UserAddressResponse
+UserOrganizationResponse
+UserResponse
+PageUserResponse
+PageableObject
+SortObject
+UserVersantScoreRequest
+
+
+
+AUTOPAY_SYNCH_SERVICE
+ 1.0.0 
+OAS 3.0
+AutoPay Synch Service
+
+Servers
+
+https://credit-card-financials-istio-ingress.crdapp.dv.c1b.aws/auto-pay-config-sync-service - auto-pay-config-sync-service
+AutoPay Synch Service
+
+
+POST
+/private/creditcard/financials/autopay/reprocess
+Re-Process AutoPay Sync Requests based on origin system and batch size
+Re-Process Failed AutoPay Sync Requests
+
+Parameters
+Try it out
+Name	Description
+api-version
+string
+(header)
+api-version
+correlationId
+string
+(header)
+correlationId
+Request body
+
+application/json
+Example Value
+Schema
+{
+  "originSystem": "MODERN",
+  "destinationSystem": "MODERN",
+  "batchSize": "string",
+  "maxRetryCount": "string"
+}
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+*/*
+Controls Accept header.
+Example Value
+Schema
+{
+  "status": "string"
+}
+No links
+400	
+Bad Request
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "errorMsg": [
+    {
+      "errorDesc": "string"
+    }
+  ],
+  "statusCode": 0,
+  "timestamp": "string"
+}
+No links
+500	
+Internal Server Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "errorMsg": [
+    {
+      "errorDesc": "string"
+    }
+  ],
+  "statusCode": 0,
+  "timestamp": "string"
+}
+No links
+
+POST
+/private/creditcard/financials/autopay/reprocess-by-id
+Reprocess AutoPay Sync Requests by originSystemIds
+Reprocess AutoPay Synch By Id
+
+Parameters
+Try it out
+Name	Description
+api-version
+string
+(header)
+api-version
+correlationId
+string
+(header)
+correlationId
+Request body
+
+application/json
+Example Value
+Schema
+{
+  "originSystemIds": "string",
+  "maxRetryCount": "string"
+}
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+*/*
+Controls Accept header.
+Example Value
+Schema
+{
+  "status": "string"
+}
+No links
+400	
+Bad Request
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "errorMsg": [
+    {
+      "errorDesc": "string"
+    }
+  ],
+  "statusCode": 0,
+  "timestamp": "string"
+}
+No links
+500	
+Internal Server Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "errorMsg": [
+    {
+      "errorDesc": "string"
+    }
+  ],
+  "statusCode": 0,
+  "timestamp": "string"
+}
+No links
+
+GET
+/private/creditcard/financials/autopay/kafka-consumer/health-status
+Check Kafka Consumer Health for both LTM and MTL
+Check Kafka Consumer Health for both LTM and MTL
+
+Parameters
+Try it out
+No parameters
+
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+*/*
+Controls Accept header.
+Example Value
+Schema
+{
+  "consumers": [
+    {
+      "eventType": "MODERN_TO_LEGACY",
+      "topic": "string",
+      "status": "ACTIVE"
+    }
+  ]
+}
+No links
+500	
+Internal Server Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "errorMsg": [
+    {
+      "errorDesc": "string"
+    }
+  ],
+  "statusCode": 0,
+  "timestamp": "string"
+}
+No links
+
+Schemas
+ReprocessRequest
+ReprocessResponse
+ReprocessByIdRequest
+ConsumerHealthStatusResponse
+ConsumerStatus
+ErrorDescription
+ErrorResponse
+
+
+
+ciam folder yml classes
+
+Customer Domain Service
+ v1.34.0 
+OAS 3.0
+Customer Identity and Access Management API Microservice
+
+Servers
+
+https://devapi.vda.dv01.c1busw2.aws/private/enterprise/customer
+07. Product Entitlement
+
+
+GET
+/systemlinkages
+Find SystemLinkagesResponse based on search parameters
+Parameters
+Try it out
+Name	Description
+systemCustomerId
+string
+(query)
+systemCustomerId
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+application/hal+json
+Controls Accept header.
+Example Value
+Schema
+{
+  "content": [
+    {
+      "createdBy": "string",
+      "createdTimestamp": "1950-10-09T20:56:24.668+24:04",
+      "individualUniqueIdentifier": "53681329-8428-4bc5-a5b2-b7058431d5c4",
+      "recordStatus": "ACT",
+      "source": "CAS",
+      "systemCustomerId": "string",
+      "systemLinkageId": "53681329-8428-4bc5-a5b2-b7058431d5c4",
+      "systemStatus": "ACT",
+      "systemType": "ACT",
+      "updatedTimestamp": "2006-06-19T10:36:13.549+58:81",
+      "updatedBy": "ACT",
+      "versionNumber": 0
+    }
+  ],
+  "pageable": {
+    "offset": 0,
+    "sort": {
+      "empty": true,
+      "sorted": true,
+      "unsorted": true
+    },
+    "pageNumber": 0,
+    "pageSize": 0,
+    "unpaged": true,
+    "paged": true
+  },
+  "last": true,
+  "totalPages": 0,
+  "totalElements": 0,
+  "size": 0,
+  "number": 0,
+  "sort": {
+    "empty": true,
+    "sorted": true,
+    "unsorted": true
+  },
+  "first": true,
+  "numberOfElements": 0,
+  "empty": true
+}
+No links
+400	
+Bad Request
+
+Media type
+
+application/hal+json
+Example Value
+Schema
+{
+  "errorCode": "string",
+  "errorMessage": "string",
+  "errorDescription": "string"
+}
+No links
+
+Schemas
+ErrorDetails
+SystemLinkagesResponse
+SystemLinkage
+PageableObject
+SortObject
+
+
+Credit Account Service
+ v1.1 
+OAS 3.0
+Credit Account Service
+
+Servers
+
+https://devapi.vda.dv01.c1busw2.aws - Generated server url
+Credit Account Service
+
+
+GET
+/private/creditcard/accounts
+Get Accounts
+getAccounts
+
+Parameters
+Try it out
+Name	Description
+correlationId
+string
+(header)
+correlationId
+individualId *
+string($uuid)
+(query)
+Individual ID
+
+ae787cc8-beaf-46da-a88a-6ef38ab5239e
+Responses
+Code	Description	Links
+200	
+OK
+
+Media type
+
+*/*
+Controls Accept header.
+Example Value
+Schema
+{
+  "page": {
+    "totalPages": 0,
+    "totalElements": 0,
+    "size": 0,
+    "number": 0
+  },
+  "content": [
+    {
+      "individualId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+      "involvementId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+      "accountInvolvementType": "PRIMARY",
+      "accountId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+      "accountOpenDate": "2017-07-21",
+      "accountState": "string",
+      "accountStatus": "string",
+      "externalStatus": "string",
+      "externalReasonCode": "string",
+      "status": "AUTHORIZATION_PROHIBITED",
+      "subStatus": "string",
+      "accountCloseDate": "2017-07-21",
+      "isOverlimit": true,
+      "isDelinquent": true,
+      "isPaymentEligible": true,
+      "isExpressPayEligible": true,
+      "isAutoPayEligible": true,
+      "isDigitalViewAllowed": true,
+      "creditLimit": 100500.09,
+      "availableCredit": 100500.09,
+      "productKey": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "savingsAccountNumber": "string",
+      "device": {
+        "deviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+        "issuedDeviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+        "accountId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+        "prinNumber": "1020",
+        "agentNumber": "1104",
+        "systemNumber": "41030",
+        "previousDeviceId": "ae787cc8-beaf-46da-a88a-6ef38ab5239e",
+        "deviceType": "CREDIT_CARD",
+        "firstIssuedDate": "2017-07-21",
+        "currentDeviceIssuedDate": "2017-07-21",
+        "deviceStatus": "NORMAL",
+        "activationStatus": true,
+        "network": "VISA",
+        "isCurrentDevice": true,
+        "deviceLast4": "9837",
+        "currentAnnualMerchandiseRate": 0,
+        "annualChargeAmount": 0,
+        "issuedDate": "2017-07-21",
+        "expirationDate": "2017-07-01",
+        "plasticDesignCode": "CJ",
+        "activationCode": "string",
+        "createdBy": "Internal System - Accounts Domain",
+        "createdTimestamp": "2017-07-21T17:32:28.123Z",
+        "updatedBy": "Internal System - Accounts Domain",
+        "updatedTimestamp": "2017-07-21T17:32:28.123Z"
+      },
+      "createdBy": "string",
+      "createdTimestamp": 0,
+      "updatedBy": "string",
+      "deviceStatus": "string",
+      "updatedTimestamp": 0,
+      "isNegativeAmortization": true
+    }
+  ]
+}
+No links
+400	
+Bad Request
+
+Media type
+
+*/*
+Example Value
+Schema
+{
+  "errorMsg": [
+    "Error Processing your request"
+  ],
+  "statusCode": 404,
+  "timestamp": "2017-07-21T17:32:28Z"
+}
+No links
+404	
+Not Found
+
+Media type
+
+*/*
+Example Value
+Schema
+{
+  "errorMsg": [
+    "Error Processing your request"
+  ],
+  "statusCode": 404,
+  "timestamp": "2017-07-21T17:32:28Z"
+}
+No links
+500	
+Internal Server Error
+
+Media type
+
+*/*
+Example Value
+Schema
+{
+  "errorMsg": [
+    "Error Processing your request"
+  ],
+  "statusCode": 404,
+  "timestamp": "2017-07-21T17:32:28Z"
+}
+No links
+SystemLinkage
+
+
+GET
+/private/creditcard/accounts/systemlinkage
+NOTE THIS ENDPOINT IS A DRAFT FOR - Get Device replacement Eligibility
+Get SystemLinkage
+
+Parameters
+Try it out
+Name	Description
+()
+Responses
+Code	Description	Links
+200	
+No links
+400	
+No links
+401	
+No links
+404	
+No links
+429	
+No links
+500	
+No links
+
+Schemas
+ErrorResponse
+DateTime
+IndividualId
+AccountsDetailsResponse
+Page
+InvolvementId
+AccountInvolvementType
+AccountId
+AccountOpenDate
+AccountCloseDate
+CreditLimit
+AvailableCredit
+ProductKey
+CurrentIssuedDevice
+DeviceId
+PrinNumber
+AgentNumber
+SystemNumber
+PreviousDeviceId
+DeviceType
+DeviceIssuedDate
+IssuedDeviceIssuedDate
+DeviceStatus
+Network
+DeviceLast4
+
+
+
+This is my application property files 
+
+
+env=${ENV:local}
+health.uri=${HEALTH_URI:/actuator/health}
+spring.autoconfigure.exclude=org.springframework.boot.actuate.autoconfigure.hazelcast.HazelcastHealthContributorAutoConfiguration
+
+# Database configuration for autopaysync
+database.autopaysync.host=${AUTO_PAY_SYNC_SERVICE_DB_JDBC_HOST:crd-app-dev-pgsql-inst01.v7f.dv01.c1busw2.aws}
+database.autopaysync.port=${AUTO_PAY_SYNC_SERVICE_DB_PORT:5555}
+database.autopaysync.username=${AUTO_PAY_SYNC_SERVICE_DB_USERNAME}
+database.autopaysync.password=${AUTO_PAY_SYNC_SERVICE_DB_PASSWORD}
+database.autopaysync.database-name=${AUTO_PAY_SYNC_SERVICE_DB_NAME:credit_card_account}
+database.autopaysync.max-idle-time=${AUTO_PAY_SYNC_SERVICE_DB_POOL_MAX_IDLE_TIME:5}
+database.autopaysync.max-pool-size=${AUTO_PAY_SYNC_SERVICE_DB_MAX_POOL_SIZE:10}
+database.autopaysync.initial-pool-size=${AUTO_PAY_SYNC_SERVICE_DB_INITIAL_POOL_SIZE:3}
+database.autopaysync.repository-base-package=${AUTO_PAY_SYNC_SERVICE_DATABASE_REPOSITORY_BASE_PACKAGE:com.creditone.ucrm.autopaysynch.repository.autopaysync}
+database.autopaysync.max-acquire-time=${AUTO_PAY_SYNC_SERVICE_MAX_ACQUIRE_TIME:30}
+database.autopaysync.max-create-connection-time=${AUTO_PAY_SYNC_SERVICE_MAX_CREATE_CONNECTION_TIME:10}
+database.autopaysync.max-life-time=${AUTO_PAY_SYNC_SERVICE_MAX_LIFETIME:120}
+database.autopaysync.acquire-retry=${AUTO_PAY_SYNC_SERVICE_ACQUIRE_RETRY:3}
+
+# Database configuration for autopay
+database.autopay.host=${AUTO_PAY_SERVICE_DB_JDBC_HOST:crd-app-dev-pgsql-inst01.v7f.dv01.c1busw2.aws}
+database.autopay.port=${AUTO_PAY_SERVICE_DB_PORT:5555}
+database.autopay.username=${AUTO_PAY_SERVICE_DB_USERNAME}
+database.autopay.password=${AUTO_PAY_SERVICE_DB_PASSWORD}
+database.autopay.database-name=${AUTO_PAY_SERVICE_DB_NAME:credit_card_account}
+database.autopay.max-idle-time=${AUTO_PAY_SERVICE_DB_POOL_MAX_IDLE_TIME:5}
+database.autopay.max-pool-size=${AUTO_PAY_SERVICE_DB_MAX_POOL_SIZE:10}
+database.autopay.initial-pool-size=${AUTO_PAY_SERVICE_DB_INITIAL_POOL_SIZE:3}
+database.autopay.repository-base-package=${AUTO_PAY_SERVICE_DATABASE_REPOSITORY_BASE_PACKAGE:com.creditone.ucrm.autopaysynch.repository.autopay}
+database.autopay.max-acquire-time=${AUTO_PAY_SERVICE_MAX_ACQUIRE_TIME:30}
+database.autopay.max-create-connection-time=${AUTO_PAY_SERVICE_MAX_CREATE_CONNECTION_TIME:10}
+database.autopay.max-life-time=${AUTO_PAY_SERVICE_MAX_LIFETIME:120}
+database.autopay.acquire-retry=${AUTO_PAY_SERVICE_ACQUIRE_RETRY:3}
+
+#HTTP Configuration
+config.http.retry-count=${HTTP_RETRY_COUNT:3}
+config.http.retry-duration-seconds=${HTTP_RETRY_DURATION_SECONDS:5}
+config.http.max-connections=${HTTP_MAX_CONNECTIONS:60}
+config.http.max-inmemory-size=${HTTP_MAX_INMEMORY_SIZE:8388608}
+config.http.max-connection-pool=${HTTP_MAX_CONNECTION_POOL:200}
+config.http.max-idle-time-seconds=${HTTP_MAX_IDLE_TIME_S:60}
+config.http.max-life-time-seconds=${HTTP_MAX_LIFE_TIME_S:60}
+config.http.connection-timeout-millis=${HTTP_MAX_CONN_TIMEOUT_MILLIS:15000}
+config.http.response-timeout-millis=${HTTP_MAX_RESPONSE_TIMEOUT_MILLIS:15000}
+config.http.read-timeout-millis=${HTTP_MAX_READ_TIMEOUT_MILLIS:15000}
+config.http.write-timeout-millis=${HTTP_MAX_WRITE_TIMEOUT_MILLIS:15000}
+config.http.enable-metrics=${HTTP_ENABLE_METRICS:true}
+config.http.evict-in-background-seconds=${HTTP_MAX_EVICTINBACKGROUND_S:120}
+
+# Kafka Legacy To Modern Consumer OnPrem Configuration
+kafka.consumer.legacy-to-modern.bootstrap-address=${KAFKA_LEGACY_CONSUMER_BOOTSTRAP_ADDRESS}
+kafka.consumer.legacy-to-modern.topic=${KAFKA_LEGACY_CONSUMER_TOPIC}
+kafka.consumer.legacy-to-modern.group-id=${KAFKA_LEGACY_CONSUMER_GROUP_ID}
+kafka.consumer.legacy-to-modern.sasl-username=${KAFKA_SASL_SSL_KAFKA_LEGACY_CONSUMER_USERNAME}
+kafka.consumer.legacy-to-modern.sasl-password=${KAFKA_SASL_SSL_KAFKA_LEGACY_CONSUMER_PASSWORD}
+kafka.consumer.legacy-to-modern.concurrency=${KAFKA_CONSUMER_LEGACY_TO_MODERN_CONCURRENCY:10}
+kafka.consumer.legacy-to-modern.rate_limit=${KAFKA_CONSUMER_LEGACY_TO_MODERN_RATE_LIMIT:10}
+kafka.consumer.legacy-to-modern.replenish=${KAFKA_CONSUMER_LEGACY_TO_MODERN_RATE_REPLENISH:5}
+
+# Kafka Consumer Common Configuration
+kafka.consumer.common.auto-offset-reset=${KAFKA_CONSUMER_AUTO_OFFSET_RESET}
+kafka.consumer.common.security-protocol=${KAFKA_CONSUMER_SECURITY_PROTOCOL}
+kafka.consumer.common.session-timeout-ms=${KAFKA_SESSION_TIMEOUT_MS:30000}
+kafka.consumer.common.heartbeat-interval-ms=${KAFKA_HEARTBEAT_INTERVAL_MS:10000}
+kafka.consumer.common.commit-interval-seconds=${KAFKA_COMMIT_INTERVAL_MS:5}
+kafka.consumer.common.commit-batch-size=${KAFKA_COMMIT_BATCH_SIZE:5}
+
+# Kafka Consumer Retry Configuration
+kafka.consumer.common.retry-attempts=${KAFKA_CONSUMER_RETRY_ATTEMPTS:3}
+kafka.consumer.common.retry-backoff-ms=${KAFKA_CONSUMER_RETRY_BACKOFF_MS:1000}
+kafka.consumer.common.retry-jitter=${KAFKA_CONSUMER_RETRY_MULTIPLIER:0.1}
+kafka.consumer.common.retry-max-delay-ms=${KAFKA_CONSUMER_RETRY_MAX_DELAY_MS:10000}
+
+# Kafka Consumer Concurrency Configuration
+kafka.consumer.common.concurrency-max-poll-records=${KAFKA_CONSUMER_MAX_POLL_RECORDS:500}
+kafka.consumer.common.concurrency-fetch-min-bytes=${KAFKA_CONSUMER_FETCH_MIN_BYTES:1}
+kafka.consumer.common.concurrency-fetch-max-wait-ms=${KAFKA_CONSUMER_FETCH_MAX_WAIT_MS:500}
+kafka.consumer.common.concurrency-max-poll-interval-ms=${KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS:300000}
+kafka.consumer.common.concurrency-processing-timeout-seconds=${KAFKA_CONSUMER_PROCESSING_TIMEOUT_SECONDS:30}
+
+# Kafka SSL OnPrem Configuration
+kafka.ssl.legacy.non-msk-truststore-location=${KAFKA_ONPREM_SSL_TRUSTSTORE_LOCATION}
+kafka.ssl.legacy.non-msk-truststore-password=${KAFKA_ONPREM_SSL_TRUSTSTORE_PASSWORD}
+kafka.ssl.legacy.endpoint-identification-algorithm=
+kafka.ssl.legacy.sasl-mechanism=${KAFKA_ONPREM_SASL_MECHANISM}
+kafka.ssl.legacy.sasl-jaas-login-module=${KAFKA_ONPREM_SASL_JAAS_LOGIN_MODULE}
+
+# Kafka monitor config
+kafka.consumer.monitor.fixed-delay-ms=${KAFKA_CONSUMER_MONITOR_FIXED_DELAY:3600000}
+kafka.consumer.monitor.initial-delay-ms=${KAFKA_CONSUMER_MONITOR_INITIAL_DELAY:3600000}
+
+
+
+pom.xml files
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.creditone.ucrm.autopaysynch</groupId>
+	<artifactId>auto-pay-config-sync-service</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name></name>
+	<description></description>
+
+	<parent>
+        <!--Automation script will patch the version in case of vulnerability discovery-->
+        <groupId>com.creditone.microservice</groupId>
+        <artifactId>reactive-microservice-starter-parent</artifactId>
+        <version>3.0.0</version>
+        <relativePath/>
+    </parent>
+
+	<properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>21</java.version>
+    </properties>
+
+	<dependencies>
+		<dependency>
+            <groupId>com.creditone.microservice</groupId>
+            <artifactId>reactive-microservice-common-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-security</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.cloud</groupId>
+                    <artifactId>spring-cloud-starter-vault-config</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-logging</artifactId>
+            <version>3.5.7</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-to-slf4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <version>3.0.0</version>
+			<scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <version>3.7.13</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.19.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+            <version>1.9.25</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.8</version>
+        </dependency>
+        <dependency>
+            <groupId>io.hypersistence</groupId>
+            <artifactId>hypersistence-utils-hibernate-63</artifactId>
+            <version>3.12.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kie</groupId>
+            <artifactId>kie-ci</artifactId>
+            <version>10.1.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast</artifactId>
+            <version>5.5.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast-enterprise</artifactId>
+            <version>5.5.0</version>
+        </dependency>
+	</dependencies>
+
+	<build>
+		<resources>
+            <resource>
+                <filtering>true</filtering>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>**/*.properties</include>
+                    <include>**/*.json</include>
+                </includes>
+            </resource>
+        </resources>
+		<plugins>
+			<plugin>
+				<groupId>org.openapitools</groupId>
+				<artifactId>openapi-generator-maven-plugin</artifactId>
+				<version>6.6.0</version>
+				<executions>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>ciam</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/ciam/ciam.yml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.ciam.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>credit-account-service</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/credit-account-service/credit-account-service.yml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.creditaccountservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>creditcard-extaccounts-agentid-fallback-service-api</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/agentidfallbackservice/agentid-fallback-service.yaml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.agentidfallbackservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+					<execution>
+						<?m2e execute onConfiguration,onIncremental?>
+						<id>auto-pay-config-sync-service</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<configuration>
+							<inputSpec>${project.basedir}/src/main/resources/swagger/autopayconfigsyncservice/auto-pay-config-sync-service.yaml</inputSpec>
+							<output>${project.build.directory}/generated-sources/swagger</output>
+							<apiPackage></apiPackage>
+							<invokerPackage></invokerPackage>
+							<modelPackage>com.creditone.swagger.autopayconfigsyncservice.dtoswagger</modelPackage>
+							<apisToGenerate>false</apisToGenerate>
+							<generateApiTests>false</generateApiTests>
+							<generateSupportingFiles>false</generateSupportingFiles>
+							<generateModelTests>false</generateModelTests>
+							<skipValidateSpec>true</skipValidateSpec>
+							<library>resttemplate</library>
+							<generatorName>java</generatorName>
+							<configOptions>
+								<sourceFolder>src/main/java</sourceFolder>
+								<dateLibrary>java8</dateLibrary>
+								<enable303>true</enable303>
+								<useBeanValidation>true</useBeanValidation>
+								<serializableModel>true</serializableModel>
+								<reactive>true</reactive>
+								<responseWrapper>reactor.core.publisher.Mono</responseWrapper>
+								<useJakartaEe>true</useJakartaEe>
+								<openApiNullable>false</openApiNullable>
+							</configOptions>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!--  Plugin configurations are inherited from parent-->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <addResources>true</addResources>
+                </configuration>
+            </plugin>
+            <plugin>
+                <!-- Building an executable jar -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.creditone.ucrm.autopaysynch.Application</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- Plugins for Junit mvn test and Jacoco starts -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*com/creditone/ucrm/autopaysynch/Application.class</exclude>
+                        <exclude>**/*com/creditone/swagger/**</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- Plugins for Junit mvn test and Jacoco ends -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <java>
+                        <includes>
+                            <include>src/main/java/**/*.java</include>
+                            <include>src/test/java/**/*.java</include>
+                        </includes>
+                        <excludes>
+                            <exclude>target/generated-sources/**/*.java</exclude>
+                            <exclude>src/main/java/**/generated/**/*.java</exclude>
+                        </excludes>
+                        <importOrder>
+                            <order>
+                                java|javax,jakarta,org.springframework,org,com,com.creditone,,\#</order>
+                        </importOrder>
+                        <eclipse>
+					        <file>${project.basedir}/code-formatter.xml</file>
+					    </eclipse>
+                        <removeUnusedImports />
+                        <replace>
+                            <name>Remove extra blank lines</name>
+                            <search>\n\n\n+</search>
+                            <replacement>\n\n</replacement>
+                        </replace>
+                        <trimTrailingWhitespace />
+                        <endWithNewline />
+                    </java>
+                    <formats>
+                        <format>
+						    <includes>
+						        <include>src/main/resources/**/*.yml</include>
+						        <include>src/main/resources/**/*.yaml</include>
+						        <include>src/test/resources/**/*.yml</include>
+						        <include>src/test/resources/**/*.yaml</include>
+						    </includes>
+						    <trimTrailingWhitespace />
+						    <endWithNewline />
+						    <indent>
+						        <spaces>true</spaces>
+						        <spacesPerTab>2</spacesPerTab>
+						    </indent>
+						</format>
+                        <format>
+                            <includes>
+                                <include>src/main/resources/**/*.properties</include>
+                                <include>src/test/resources/**/*.properties</include>
+                            </includes>
+                            <trimTrailingWhitespace />
+                            <endWithNewline />
+                        </format>
+                    </formats>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotless-apply</id>
+                        <goals>
+                            <goal>apply</goal>
+                        </goals>
+                        <phase>process-sources</phase>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+			    <groupId>org.apache.maven.plugins</groupId>
+			    <artifactId>maven-compiler-plugin</artifactId>
+			    <configuration>
+			        <annotationProcessorPaths>
+			            <path>
+			                <groupId>org.projectlombok</groupId>
+			                <artifactId>lombok</artifactId>
+			                <version>1.18.42</version>
+			            </path>
+			        </annotationProcessorPaths>
+			    </configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+	<repositories>
+        <repository>
+            <!--All packages needed can be found at Development Group-->
+            <id>gitlab-maven</id>
+            <url>https://gitlab.com/api/v4/groups/13452711/-/packages/maven</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>sona-hazelcast</id>
+            <url>https://sona-artifacts.c1b.corp/repository/maven-hazelcast/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+</project>
+
+
+
+
+
+
+
+
+
+
+
+
