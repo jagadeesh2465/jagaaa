@@ -1,0 +1,62 @@
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+
+- Wrapper processor for Hazelcast operations in the autopay synchronization system.
+- Provides safe access to Hazelcast distributed maps.
+- This component handles optional Hazelcast dependency injection and provides
+- error handling for distributed cache operations.
+  */
+  @Slf4j
+  @Component
+  public class HazelcastWrapperProcessor {
+  
+  private final HazelcastInstance hazelcastInstance;
+  private final boolean hazelcastAvailable;
+  
+  public HazelcastWrapperProcessor(
+  @Autowired(required = false) HazelcastInstance hazelcastInstance) {
+  this.hazelcastInstance = hazelcastInstance;
+  this.hazelcastAvailable = hazelcastInstance != null;
+  if (hazelcastAvailable) {
+  log.info(“HazelcastWrapperProcessor initialized with active Hazelcast instance.”);
+  } else {
+  log.warn(“HazelcastWrapperProcessor initialized without Hazelcast. Will fall back to external service.”);
+  }
+  }
+  
+  /**
+  - Retrieves a distributed map from Hazelcast by name with error handling.
+  - Returns null if Hazelcast is unavailable or if an error occurs during map retrieval.
+  - 
+  - @param mapName       the name of the distributed map to retrieve
+  - @param correlationId unique identifier for tracking this operation across logs
+  - @return the requested IMap containing GenericRecord values, or null if unavailable or on error
+    */
+    public IMap<String, GenericRecord> getMap(String mapName, String correlationId) {
+    try {
+    if (hazelcastAvailable) {
+    return hazelcastInstance.getMap(mapName);
+    }
+    return null;
+    } catch (Exception e) {
+    log.error(AutoPaySynchConstant.LOG_PREFIX
+    + “Error getting map {} from Hazelcast, error: {} cause: {}”,
+    correlationId, mapName, e.getMessage(),
+    ExceptionUtils.getStackTrace(e).replaceAll(”\r?\n”, “ “));
+    return null;
+    }
+    }
+    }
