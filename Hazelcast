@@ -1,0 +1,100 @@
+package com.creditone.ucrm.autopaysynch.processor;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import com.hazelcast.map.IMap;
+import com.hazelcast.nio.serialization.genericrecord.GenericRecord;
+
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant;
+import com.creditone.ucrm.autopaysynch.constant.AutoPaySynchConstant.SyncType;
+import com.creditone.ucrm.autopaysynch.service.ExternalCallService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
+/**
+
+- Abstract base processor for Hazelcast-based ID mapping with external service fallback. Provides
+- common functionality for converting IDs between modern and legacy systems.
+- 
+- @param <T> the return type for converted IDs
+  */
+  @Slf4j
+  @RequiredArgsConstructor
+  public abstract class AbstractHazelcastLookupProcessor<T> {
+  
+  protected final HazelcastWrapperProcessor hazelcastWrapperProcessor;
+  protected final ExternalCallService externalCallService;
+  
+  /**
+  - Converts an ID based on the specified sync type. First attempts to retrieve from Hazelcast
+  - cache, then falls back to external service.
+  - 
+  - @param key           the ID to convert
+  - @param syncType      the direction of conversion
+  - @param correlationId unique identifier for tracking the request
+  - @return Mono containing the converted ID, or empty if conversion fails
+    */
+    public Mono<T> convertId(String key, SyncType syncType, String correlationId) {
+    if (key == null || key.trim().isEmpty()) {
+    log.warn(AutoPaySynchConstant.LOG_PREFIX + “Invalid key provided for {} conversion for {}”, correlationId, getEntityType(), syncType);
+    return Mono.empty();
+    }
+    
+    log.info(AutoPaySynchConstant.LOG_PREFIX + “{} Converting ID for {}: key={}”, correlationId, getEntityType(), syncType, key);
+    
+    return getIdFromHazelcast(key, syncType, correlationId).switchIfEmpty(fallbackToExternalService(key, syncType, correlationId)).doOnSuccess(result -> {
+    if (result != null) {
+    log.info(AutoPaySynchConstant.LOG_PREFIX + “{} ID conversion successful for {}: {} -> {}”, correlationId, getEntityType(), syncType, key, result);
+    }
+    });
+    }
+  
+  /** Retrieves ID from Hazelcast cache based on sync type configuration. */
+  private Mono<T> getIdFromHazelcast(String key, SyncType syncType, String correlationId) {
+  try {
+  String mapName = getMapName(syncType);
+  String keyName = getKeyName(syncType);
+  
+  ```
+     IMap<String, GenericRecord> map = hazelcastWrapperProcessor.getMap(mapName, correlationId);
+     if (map == null) {
+        log.warn(AutoPaySynchConstant.LOG_PREFIX + "Hazelcast map '{}' not found for {}", correlationId, mapName, syncType);
+        return Mono.empty();
+     }
+  
+     GenericRecord record = map.get(key);
+     if (record == null) {
+        log.warn(AutoPaySynchConstant.LOG_PREFIX + "Record not found for key '{}' in map '{}' for {}", correlationId, key, mapName, syncType);
+        return Mono.empty();
+     }
+  
+     return processRecord(record, syncType, correlationId, keyName);
+  
+  } catch (Exception e) {
+     log.warn(AutoPaySynchConstant.LOG_PREFIX + "Error retrieving {} ID for {} from Hazelcast for key={}, error={}, cause={}", getEntityType(), syncType, correlationId,
+           key, e.getMessage(), ExceptionUtils.getStackTrace(e).replaceAll("\\r?\\n", " "));
+     return Mono.empty();
+  }
+  ```
+  
+  }
+  
+  /** Fallback method that delegates to external service when Hazelcast lookup fails. */
+  private Mono<T> fallbackToExternalService(String key, SyncType syncType, String correlationId) {
+  log.info(AutoPaySynchConstant.LOG_PREFIX + “Falling back to externalCallService for {} for key={}”, correlationId, syncType, key);
+  return callExternalService(key, syncType, correlationId);
+  }
+  
+  // Abstract methods to be implemented by concrete classes
+  protected abstract String getMapName(SyncType syncType);
+  
+  protected abstract String getKeyName(SyncType syncType);
+  
+  protected abstract String getEntityType();
+  
+  protected abstract Mono<T> processRecord(GenericRecord record, SyncType syncType, String correlationId, String keyName);
+  
+  protected abstract Mono<T> callExternalService(String key, SyncType syncType, String correlationId);
+  }
